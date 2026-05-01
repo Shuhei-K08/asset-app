@@ -61,6 +61,26 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# =========================
+# 🔐 ログイン
+# =========================
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔐 ログイン")
+
+    password = st.text_input("パスワードを入力してください", type="password")
+
+    if st.button("ログイン"):
+        if password == st.secrets["APP_PASSWORD"]:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("パスワードが違います")
+
+    st.stop()
+
 st.set_page_config(page_title="資産管理アプリ", page_icon="💰", layout="wide")
 
 ACCENT = "#f45b22"
