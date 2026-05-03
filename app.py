@@ -572,18 +572,12 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
 
     base_key = f"{tx_type}_{title}"
 
-    # =========================
-    # 月固定
-    # =========================
     tx_date = pd.to_datetime(selected_month).replace(day=1)
 
-    # =========================
-    # タイトル・合計
-    # =========================
-    st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
+    st.markdown(f"### {title}")
 
     total = month_df.loc[month_df["type"] == tx_type, "amount"].sum()
-    st.markdown(f'<div class="total">¥{int(total):,}</div>', unsafe_allow_html=True)
+    st.write(f"合計: ¥{int(total):,}")
 
     # =========================
     # 入力フォーム
@@ -596,15 +590,29 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
         description = cols[1].text_input("説明")
         category = cols[2].selectbox("カテゴリ", categories)
 
-        if st.form_submit_button(f"{title}を追加"):
-            insert_transaction(tx_date, tx_type, category, int(amount), description or "")
-            st.success("追加しました")
-            st.rerun()
+        submitted = st.form_submit_button(f"{title}を追加")
+
+        if submitted:
+
+            try:
+                insert_transaction(
+                    tx_date,
+                    tx_type,
+                    category,
+                    int(amount),
+                    description or ""
+                )
+
+                st.success("追加しました")
+                st.rerun()
+
+            except Exception as e:
+                st.error(e)
 
     st.markdown("---")
 
     # =========================
-    # データ整形
+    # 一覧（削除）
     # =========================
     df = month_df[month_df["type"] == tx_type].copy()
 
@@ -613,7 +621,6 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
         return
 
     df["ID"] = df["id"]
-    df["種別表示"] = df["ID"].apply(lambda x: "🔁 定期" if pd.isna(x) else "")
 
     display_df = df.rename(columns={
         "date": "年月",
@@ -625,28 +632,17 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
     display_df = display_df.drop(columns=["type", "signed_amount"], errors="ignore")
 
     display_df["年月"] = pd.to_datetime(display_df["年月"]).dt.strftime("%Y年%-m月")
-    display_df["説明"] = display_df["説明"].fillna("")
-    display_df["カテゴリ"] = display_df["カテゴリ"].fillna("")
     display_df["削除"] = False
 
-    display_df = display_df[["ID", "種別表示", "年月", "金額", "説明", "カテゴリ", "削除"]]
+    display_df = display_df[["ID", "年月", "金額", "説明", "カテゴリ", "削除"]]
 
-    # =========================
-    # session_state初期化
-    # =========================
-    if f"{base_key}_data" not in st.session_state:
-        st.session_state[f"{base_key}_data"] = display_df.copy()
-
-    # =========================
-    # data_editor（state保存）
-    # =========================
     edited = st.data_editor(
-        st.session_state[f"{base_key}_data"],
-        key=f"{base_key}_editor",
+        display_df,
+        key=f"{base_key}_table",
         use_container_width=True,
         hide_index=True,
-        height=350,
-        disabled=["ID", "種別表示", "年月", "金額", "説明", "カテゴリ"],
+        height=300,
+        disabled=["ID", "年月", "金額", "説明", "カテゴリ"],
         column_config={
             "削除": st.column_config.CheckboxColumn("削除"),
             "金額": st.column_config.NumberColumn("金額", format="¥%d"),
@@ -654,50 +650,46 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
         },
     )
 
-    # 👇 最新状態を保存（重要）
-    st.session_state[f"{base_key}_data"] = edited
+    # =========================
+    # 削除処理
+    # =========================
+    delete_ids = edited.loc[
+        (edited["削除"] == True) & (edited["ID"].notna()),
+        "ID"
+    ].tolist()
 
-    # =========================
-    # 削除ボタン（ここだけで実行）
-    # =========================
     if st.button("削除", key=f"{base_key}_delete"):
 
-        current_df = st.session_state[f"{base_key}_data"]
-
-        delete_ids = current_df.loc[
-            (current_df["削除"] == True) & (current_df["ID"].notna()),
-            "ID"
-        ].tolist()
-
-        if len(delete_ids) == 0:
+        if not delete_ids:
             st.warning("削除対象がありません")
             return
 
         for i in delete_ids:
-            delete_transaction(int(i))
+            supabase.table("transactions").delete().eq("id", int(i)).execute()
 
-        st.success(f"{len(delete_ids)}件削除しました")
-
-        # リセット（チェック外す）
-        st.session_state[f"{base_key}_data"]["削除"] = False
-
+        st.success("削除しました")
         st.rerun()
-
-    # =========================
-    # UX補足
-    # =========================
-    if display_df["ID"].isna().any():
-        st.caption("※定期収支はここでは削除できません")
 
 
 def insert_transaction(tx_date, tx_type, category, amount, description):
-    supabase.table("transactions").insert({
-        "date": tx_date.isoformat(),
-        "type": tx_type,
-        "category": category,
-        "amount": amount,
-        "description": description
-    }).execute()
+
+    try:
+        res = supabase.table("transactions").insert({
+            "date": tx_date.isoformat(),
+            "type": tx_type,
+            "category": category,
+            "amount": int(amount),
+            "description": description
+        }).execute()
+
+        # 👇 Supabaseエラー拾う（重要）
+        if hasattr(res, "error") and res.error:
+            raise Exception(res.error)
+
+        return True
+
+    except Exception as e:
+        raise Exception(f"INSERT失敗: {e}")
 
 def render_category_delete_editor(cat_df: pd.DataFrame):
     editor_df = categories_display_frame(cat_df)
@@ -1590,13 +1582,13 @@ elif page == "設定":
         st.markdown('</div>', unsafe_allow_html=True)
 
     elif setting_page == "カテゴリ":
-    
+
         st.subheader("カテゴリの追加")
-    
+
         with st.form("category_form", clear_on_submit=True):
-        
+
             cols = st.columns([1, 2])
-    
+
             # 👇 keyをユニークに変更（ここ重要）
             new_type_label = cols[0].segmented_control(
                 "種別",
@@ -1604,39 +1596,39 @@ elif page == "設定":
                 default="支出",
                 key="category_add_type"   # ←変更
             )
-    
+
             new_name = cols[1].text_input(
                 "カテゴリ名",
                 key="category_add_name"   # ←追加（安全のため）
             )
-    
+
             submitted = st.form_submit_button("カテゴリを追加", type="primary")
-    
+
             if submitted:
-            
+
                 if not new_name.strip():
                     st.error("カテゴリ名を入力してください。")
-    
+
                 elif new_name.strip() in cat_df["name"].tolist():
                     st.error("同じカテゴリ名が既にあります。")
-    
+
                 else:
                     # 👇 明示的に変換（安全）
                     new_type = "expense" if new_type_label == "支出" else "income"
-    
+
                     save_category(new_name.strip(), new_type)
-    
+
                     st.success("カテゴリを追加しました。")
-    
+
                     # 👇 stateリセット（これがバグ防止の核心）
                     if "category_add_type" in st.session_state:
                         del st.session_state["category_add_type"]
-    
+
                     if "category_add_name" in st.session_state:
                         del st.session_state["category_add_name"]
-    
+
                     st.rerun()
-    
+
         st.subheader("カテゴリ一覧・削除")
         render_category_delete_editor(cat_df)
         
