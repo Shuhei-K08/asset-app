@@ -583,11 +583,7 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
     st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
 
     total = month_df.loc[month_df["type"] == tx_type, "amount"].sum()
-
-    st.markdown(
-        f'<div class="total">¥{int(total):,}</div>',
-        unsafe_allow_html=True
-    )
+    st.markdown(f'<div class="total">¥{int(total):,}</div>', unsafe_allow_html=True)
 
     # =========================
     # 入力フォーム
@@ -601,20 +597,14 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
         category = cols[2].selectbox("カテゴリ", categories)
 
         if st.form_submit_button(f"{title}を追加"):
-            insert_transaction(
-                tx_date,
-                tx_type,
-                category,
-                int(amount),
-                description or ""
-            )
+            insert_transaction(tx_date, tx_type, category, int(amount), description or "")
             st.success("追加しました")
             st.rerun()
 
     st.markdown("---")
 
     # =========================
-    # データ
+    # データ整形
     # =========================
     df = month_df[month_df["type"] == tx_type].copy()
 
@@ -622,10 +612,7 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
         st.info("データがありません")
         return
 
-    # ID保持
     df["ID"] = df["id"]
-
-    # 👇 定期収支判定
     df["種別表示"] = df["ID"].apply(lambda x: "🔁 定期" if pd.isna(x) else "")
 
     display_df = df.rename(columns={
@@ -638,21 +625,24 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
     display_df = display_df.drop(columns=["type", "signed_amount"], errors="ignore")
 
     display_df["年月"] = pd.to_datetime(display_df["年月"]).dt.strftime("%Y年%-m月")
-
     display_df["説明"] = display_df["説明"].fillna("")
     display_df["カテゴリ"] = display_df["カテゴリ"].fillna("")
-
     display_df["削除"] = False
 
-    # 表示カラム
     display_df = display_df[["ID", "種別表示", "年月", "金額", "説明", "カテゴリ", "削除"]]
 
     # =========================
-    # 表示
+    # session_state初期化
+    # =========================
+    if f"{base_key}_data" not in st.session_state:
+        st.session_state[f"{base_key}_data"] = display_df.copy()
+
+    # =========================
+    # data_editor（state保存）
     # =========================
     edited = st.data_editor(
-        display_df,
-        key=f"{base_key}_table",
+        st.session_state[f"{base_key}_data"],
+        key=f"{base_key}_editor",
         use_container_width=True,
         hide_index=True,
         height=350,
@@ -664,24 +654,40 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
         },
     )
 
-    # =========================
-    # 削除処理（ガード付き）
-    # =========================
-    delete_ids = edited.loc[
-        (edited["削除"] == True) & (edited["ID"].notna()),
-        "ID"
-    ].tolist()
+    # 👇 最新状態を保存（重要）
+    st.session_state[f"{base_key}_data"] = edited
 
-    # 👇 定期収支チェック検知
-    if edited.loc[(edited["削除"] == True) & (edited["ID"].isna())].shape[0] > 0:
-        st.warning("定期収支はここでは削除できません")
+    # =========================
+    # 削除ボタン（ここだけで実行）
+    # =========================
+    if st.button("削除", key=f"{base_key}_delete"):
 
-    if st.button(f"削除（{len(delete_ids)}件）",key=f"{base_key}_delete", disabled=not delete_ids):
+        current_df = st.session_state[f"{base_key}_data"]
+
+        delete_ids = current_df.loc[
+            (current_df["削除"] == True) & (current_df["ID"].notna()),
+            "ID"
+        ].tolist()
+
+        if len(delete_ids) == 0:
+            st.warning("削除対象がありません")
+            return
+
         for i in delete_ids:
             delete_transaction(int(i))
 
         st.success(f"{len(delete_ids)}件削除しました")
+
+        # リセット（チェック外す）
+        st.session_state[f"{base_key}_data"]["削除"] = False
+
         st.rerun()
+
+    # =========================
+    # UX補足
+    # =========================
+    if display_df["ID"].isna().any():
+        st.caption("※定期収支はここでは削除できません")
 
 
 def insert_transaction(tx_date, tx_type, category, amount, description):
@@ -1584,27 +1590,53 @@ elif page == "設定":
         st.markdown('</div>', unsafe_allow_html=True)
 
     elif setting_page == "カテゴリ":
+    
         st.subheader("カテゴリの追加")
+    
         with st.form("category_form", clear_on_submit=True):
+        
             cols = st.columns([1, 2])
+    
+            # 👇 keyをユニークに変更（ここ重要）
             new_type_label = cols[0].segmented_control(
                 "種別",
                 ["支出", "収入"],
                 default="支出",
-                key="category_new_type",
+                key="category_add_type"   # ←変更
             )
-            new_type = type_value(new_type_label)
-            new_name = cols[1].text_input("カテゴリ名", key="category_new_name")
-            if st.form_submit_button("カテゴリを追加", type="primary"):
+    
+            new_name = cols[1].text_input(
+                "カテゴリ名",
+                key="category_add_name"   # ←追加（安全のため）
+            )
+    
+            submitted = st.form_submit_button("カテゴリを追加", type="primary")
+    
+            if submitted:
+            
                 if not new_name.strip():
                     st.error("カテゴリ名を入力してください。")
+    
                 elif new_name.strip() in cat_df["name"].tolist():
                     st.error("同じカテゴリ名が既にあります。")
+    
                 else:
-                    save_category(new_name, new_type)
+                    # 👇 明示的に変換（安全）
+                    new_type = "expense" if new_type_label == "支出" else "income"
+    
+                    save_category(new_name.strip(), new_type)
+    
                     st.success("カテゴリを追加しました。")
+    
+                    # 👇 stateリセット（これがバグ防止の核心）
+                    if "category_add_type" in st.session_state:
+                        del st.session_state["category_add_type"]
+    
+                    if "category_add_name" in st.session_state:
+                        del st.session_state["category_add_name"]
+    
                     st.rerun()
-
+    
         st.subheader("カテゴリ一覧・削除")
         render_category_delete_editor(cat_df)
         
