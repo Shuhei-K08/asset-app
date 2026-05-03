@@ -676,7 +676,7 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
     if edited.loc[(edited["削除"] == True) & (edited["ID"].isna())].shape[0] > 0:
         st.warning("定期収支はここでは削除できません")
 
-    if st.button(f"削除（{len(delete_ids)}件）", disabled=not delete_ids):
+    if st.button(f"削除（{len(delete_ids)}件）",key=f"{base_key}_delete", disabled=not delete_ids):
         for i in delete_ids:
             delete_transaction(int(i))
 
