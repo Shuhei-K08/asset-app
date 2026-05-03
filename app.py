@@ -377,6 +377,10 @@ def apply_recurring(month_df, recurring_df, selected_month):
     if recurring_df.empty:
         return month_df
 
+    # 👇これ追加！！！！！！
+    if "is_deleted" in recurring_df.columns:
+        recurring_df = recurring_df[recurring_df["is_deleted"] != True]
+
     current_month = pd.to_datetime(selected_month).to_period("M").to_timestamp()
 
     rows = []
@@ -402,7 +406,6 @@ def apply_recurring(month_df, recurring_df, selected_month):
         month_df = pd.concat([month_df, recurring_month_df], ignore_index=True)
 
     return month_df
-
 
 def format_jp_date(value: pd.Timestamp) -> str:
     return f"{value.year}年{value.month}月{value.day}日"
@@ -570,7 +573,7 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
     base_key = f"{tx_type}_{title}"
 
     # =========================
-    # 月固定（日付はサイドバーの月）
+    # 月固定
     # =========================
     tx_date = pd.to_datetime(selected_month).replace(day=1)
 
@@ -587,36 +590,19 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
     )
 
     # =========================
-    # 入力フォーム（※日付なし）
+    # 入力フォーム
     # =========================
     with st.form(f"{base_key}_form", clear_on_submit=True):
 
         cols = st.columns([1, 2, 1.5])
 
-        amount = cols[0].number_input(
-            "金額",
-            min_value=1,
-            step=100,
-            value=1000,
-            key=f"{base_key}_amount"
-        )
+        amount = cols[0].number_input("金額", min_value=1, step=100, value=1000)
+        description = cols[1].text_input("説明")
+        category = cols[2].selectbox("カテゴリ", categories)
 
-        description = cols[1].text_input(
-            "説明",
-            key=f"{base_key}_desc"
-        )
-
-        category = cols[2].selectbox(
-            "カテゴリ",
-            categories,
-            key=f"{base_key}_cat"
-        )
-
-        submitted = st.form_submit_button(f"{title}を追加")
-
-        if submitted:
+        if st.form_submit_button(f"{title}を追加"):
             insert_transaction(
-                tx_date,            # 👈 月固定
+                tx_date,
                 tx_type,
                 category,
                 int(amount),
@@ -628,7 +614,7 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
     st.markdown("---")
 
     # =========================
-    # 一覧データ
+    # データ
     # =========================
     df = month_df[month_df["type"] == tx_type].copy()
 
@@ -636,7 +622,11 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
         st.info("データがありません")
         return
 
-    df = df.set_index("id")
+    # ID保持
+    df["ID"] = df["id"]
+
+    # 👇 定期収支判定
+    df["種別表示"] = df["ID"].apply(lambda x: "🔁 定期" if pd.isna(x) else "")
 
     display_df = df.rename(columns={
         "date": "年月",
@@ -647,22 +637,15 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
 
     display_df = display_df.drop(columns=["type", "signed_amount"], errors="ignore")
 
-    # =========================
-    # 年月表示に変換
-    # =========================
     display_df["年月"] = pd.to_datetime(display_df["年月"]).dt.strftime("%Y年%-m月")
 
-    # Windowsの場合はこちら
-    # display_df["年月"] = pd.to_datetime(display_df["年月"]).dt.strftime("%Y年%m月")
-
-    # None対策
     display_df["説明"] = display_df["説明"].fillna("")
     display_df["カテゴリ"] = display_df["カテゴリ"].fillna("")
 
-    # 削除列
     display_df["削除"] = False
 
-    display_df = display_df[["年月", "金額", "説明", "カテゴリ", "削除"]]
+    # 表示カラム
+    display_df = display_df[["ID", "種別表示", "年月", "金額", "説明", "カテゴリ", "削除"]]
 
     # =========================
     # 表示
@@ -673,23 +656,27 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
         use_container_width=True,
         hide_index=True,
         height=350,
-        disabled=["年月", "金額", "説明", "カテゴリ"],
+        disabled=["ID", "種別表示", "年月", "金額", "説明", "カテゴリ"],
         column_config={
             "削除": st.column_config.CheckboxColumn("削除"),
             "金額": st.column_config.NumberColumn("金額", format="¥%d"),
+            "ID": None,
         },
     )
 
     # =========================
-    # 削除処理
+    # 削除処理（ガード付き）
     # =========================
-    delete_ids = edited.index[edited["削除"]].tolist()
+    delete_ids = edited.loc[
+        (edited["削除"] == True) & (edited["ID"].notna()),
+        "ID"
+    ].tolist()
 
-    if st.button(
-        f"削除（{len(delete_ids)}件）",
-        key=f"{base_key}_delete",
-        disabled=not delete_ids
-    ):
+    # 👇 定期収支チェック検知
+    if edited.loc[(edited["削除"] == True) & (edited["ID"].isna())].shape[0] > 0:
+        st.warning("定期収支はここでは削除できません")
+
+    if st.button(f"削除（{len(delete_ids)}件）", disabled=not delete_ids):
         for i in delete_ids:
             delete_transaction(int(i))
 
@@ -1021,9 +1008,17 @@ def render_asset_trend_12m(transactions_df, snapshots_df, selected_month):
 
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-def render_budget_progress(month_df, budgets_df):
+def render_budget_progress(month_df, budgets_df, cat_df):
     import streamlit as st
     import pandas as pd
+
+    # =========================
+    # 有効カテゴリ取得
+    # =========================
+    valid_categories = cat_df["name"].tolist()
+
+    # 👇 ここ追加（最重要）
+    budgets_df = budgets_df[budgets_df["category"].isin(valid_categories)]
 
     # =========================
     # 支出のみ集計
@@ -1031,13 +1026,19 @@ def render_budget_progress(month_df, budgets_df):
     expense_df = month_df[month_df["type"] == "expense"]
 
     actual = expense_df.groupby("category")["amount"].sum()
-
     budget = budgets_df.set_index("category")["amount"]
 
     df = pd.DataFrame({
         "actual": actual,
         "budget": budget
     }).fillna(0).reset_index()
+
+    # 予算0は除外
+    df = df[df["budget"] > 0]
+
+    if df.empty:
+        st.info("予算が設定されているカテゴリがありません")
+        return
 
     # =========================
     # UI表示
@@ -1049,23 +1050,13 @@ def render_budget_progress(month_df, budgets_df):
         actual_val = row["actual"]
         budget_val = row["budget"]
 
-        if budget_val == 0:
-            progress = 0
-        else:
-            progress = min(actual_val / budget_val, 1.0)
-
+        progress = min(actual_val / budget_val, 1.0)
         remaining = budget_val - actual_val
 
-        # タイトル
         st.markdown(f"### {category}")
-
-        # 金額
         st.markdown(f"¥{int(actual_val):,} / ¥{int(budget_val):,}")
-
-        # プログレスバー
         st.progress(progress)
 
-        # 残額（色分け）
         if remaining >= 0:
             st.markdown(f"<span style='color:green'>残り ¥{int(remaining):,}</span>", unsafe_allow_html=True)
         else:
@@ -1395,7 +1386,7 @@ elif page == "月間収支":
             """,
             unsafe_allow_html=True,
         )
-    render_budget_progress(month_df, budgets_df)
+    render_budget_progress(month_df, budgets_df, cat_df)
 
 elif page == "資産推移":
     st.subheader("資産推移")
