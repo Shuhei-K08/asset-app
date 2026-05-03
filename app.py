@@ -7,8 +7,16 @@ from postgrest.exceptions import APIError
 from supabase import create_client
 import altair as alt
 import datetime
+from supabase import create_client
+import os
 
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 today = datetime.date.today()
+
+
 
 st.markdown("""
 <style>
@@ -544,35 +552,54 @@ def balance_at(transactions_df: pd.DataFrame, snapshots_df: pd.DataFrame, as_of:
 
     return base_balance + int(after)
 
-def month_balances(month_df, snapshots_df, selected_month):
+def month_balances(transactions_df, snapshots_df, selected_month):
 
     import pandas as pd
 
-    start = pd.to_datetime(selected_month).to_period("M").to_timestamp()
+    # 日付整形
+    df = transactions_df.copy()
+    df["date"] = pd.to_datetime(df["date"]).dt.normalize()
 
-    # 月初残高
-    if snapshots_df.empty:
-        opening_balance = 0
+    # 対象月
+    current = pd.to_datetime(selected_month).to_period("M")
+    prev = current - 1
+
+    # =========================
+    # 基準残高
+    # =========================
+    if snapshots_df is None or snapshots_df.empty:
+        base_balance = 0
     else:
-        s = snapshots_df.copy()
-        s["snapshot_month"] = pd.to_datetime(s["snapshot_month"])
+        ss = snapshots_df.copy()
+        ss["snapshot_month"] = pd.to_datetime(ss["snapshot_month"])
+        base_balance = int(ss.sort_values("snapshot_month").iloc[0]["balance"])
 
-        valid = s[s["snapshot_month"] < start]
+    # =========================
+    # 前月までの累積
+    # =========================
+    prev_end_date = prev.to_timestamp() + pd.offsets.MonthEnd(1)
 
-        if valid.empty:
-            opening_balance = 0
-        else:
-            latest = valid.sort_values("snapshot_month").iloc[-1]
-            opening_balance = int(latest["balance"])
+    past_df = df[df["date"] <= prev_end_date]
 
-    # 👇 収支（必ず month_df）
+    income = past_df.loc[past_df["type"] == "income", "amount"].sum()
+    expense = past_df.loc[past_df["type"] == "expense", "amount"].sum()
+
+    opening = int(base_balance + income - expense)
+
+    # =========================
+    # 当月
+    # =========================
+    start = current.to_timestamp()
+    end = start + pd.offsets.MonthEnd(1)
+
+    month_df = df[(df["date"] >= start) & (df["date"] <= end)]
+
     income = month_df.loc[month_df["type"] == "income", "amount"].sum()
     expense = month_df.loc[month_df["type"] == "expense", "amount"].sum()
-    saving = income - expense
 
-    end_balance = opening_balance + saving
+    ending = int(opening + income - expense)
 
-    return opening_balance, end_balance
+    return opening, ending
 
 def monthly_asset_series(transactions_df: pd.DataFrame, snapshots_df: pd.DataFrame) -> pd.DataFrame:
     if snapshots_df.empty:
@@ -848,12 +875,7 @@ def render_budget_table(title: str, summary: pd.DataFrame):
     )
 
 def render_asset_combo_chart(transactions_df, snapshots_df, selected_month):
-
-    import pandas as pd
-    import altair as alt
-    import streamlit as st
-
-    # =========================
+        # =========================
     # 日付整形
     # =========================
     df = transactions_df.copy()
@@ -881,26 +903,21 @@ def render_asset_combo_chart(transactions_df, snapshots_df, selected_month):
     ]
 
     # =========================
-    # 基準残高
+    # 基準残高（固定）
     # =========================
     if snapshots_df is None or snapshots_df.empty:
         base_balance = 0
     else:
         ss = snapshots_df.copy()
         ss["snapshot_month"] = pd.to_datetime(ss["snapshot_month"])
-
-        # 開始月時点の残高を使う
-        base = ss[ss["snapshot_month"] <= start_month.to_timestamp()]
-
-        if base.empty:
-            base_balance = 0
-        else:
-            base_balance = int(base.sort_values("snapshot_month").iloc[-1]["balance"])
+        base_balance = int(ss.sort_values("snapshot_month").iloc[0]["balance"])
 
     # =========================
-    # 月ごと計算
+    # 月ごと計算（ここが最重要）
     # =========================
     rows = []
+
+    # 🔥 ここは必ずループ外
     current_balance = base_balance
 
     for m in months:
@@ -915,6 +932,9 @@ def render_asset_combo_chart(transactions_df, snapshots_df, selected_month):
             (df["date"] <= end)
         ].copy()
 
+        # 👇 月初（前月の月末）
+        opening = current_balance
+
         if m_period > limit_month:
             income = 0
             expense = 0
@@ -925,14 +945,20 @@ def render_asset_combo_chart(transactions_df, snapshots_df, selected_month):
             expense = month_df.loc[month_df["type"] == "expense", "amount"].sum()
 
         net = int(income - expense)
-        current_balance += net
+
+        # 👇 月末
+        ending = opening + net
+
+        # 👇 次月へ引き継ぎ（ここ超重要）
+        current_balance = ending
 
         rows.append({
             "month": start,
+            "opening": opening,
             "income": income,
             "expense": -expense,
             "net": net,
-            "balance": current_balance
+            "balance": ending
         })
 
     monthly = pd.DataFrame(rows)
@@ -977,13 +1003,14 @@ def render_asset_combo_chart(transactions_df, snapshots_df, selected_month):
 
     display_df = display_df.rename(columns={
         "month_str": "年月",
+        "opening": "月初残高",
         "income": "収入",
         "expense": "支出",
         "net": "増減",
-        "balance": "資産"
+        "balance": "月末残高"
     })
 
-    for col in ["収入", "支出", "増減", "資産"]:
+    for col in ["月初残高", "収入", "支出", "増減", "月末残高"]:
         display_df[col] = display_df[col].map(lambda x: f"¥{int(x):,}")
 
     display_df = display_df.iloc[::-1]
@@ -1178,6 +1205,42 @@ def safe_category_display(category, category_list):
     else:
         return "未分類"
 
+# =========================
+# 全期間データ取得
+# =========================
+all_transactions_df = load_table("transactions")
+all_transactions_df["date"] = pd.to_datetime(all_transactions_df["date"]).dt.normalize()
+
+recurring_df = load_table_or_empty("recurring_transactions")
+recurring_df = recurring_df[
+    (recurring_df["is_deleted"].isna()) | (recurring_df["is_deleted"] == False)
+]
+
+# =========================
+# 定期収支を全期間に適用
+# =========================
+def apply_recurring_full(df, recurring_df):
+    result = df.copy()
+
+    for _, r in recurring_df.iterrows():
+        start = pd.to_datetime(r["start_month"])
+        end = pd.to_datetime(r["end_month"]) if pd.notna(r["end_month"]) else pd.Timestamp.today()
+        dates = pd.date_range(start=start, end=end, freq="MS")
+
+        for d in dates:
+            result = pd.concat([
+                result,
+                pd.DataFrame([{
+                    "date": d,
+                    "type": r["type"],
+                    "amount": r["amount"],
+                    "category": r.get("category", None)
+                }])
+            ])
+
+    return result
+full_df = apply_recurring_full(all_transactions_df, recurring_df)
+
 def render_setup_notice(balance_ready: bool, recurring_ready: bool):
     missing = []
 
@@ -1283,9 +1346,10 @@ with st.sidebar:
     # 残高
     # =========================
     month_opening_balance, month_end_balance = month_balances(
-        month_df, snapshots_df, selected_month
+        full_df,  # ←これ
+        snapshots_df,
+        selected_month
     )
-
     # =========================
     # KPI（単月）
     # =========================
