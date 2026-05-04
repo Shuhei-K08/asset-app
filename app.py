@@ -238,6 +238,41 @@ def inject_styles() -> None:
             font-size: .82rem;
             margin-top: .45rem;
         }}
+        .action-grid {{
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .85rem;
+            margin: .75rem 0 1rem;
+        }}
+        .action-card {{
+            min-height: 116px;
+            padding: 1rem;
+            border: 1px solid rgba(219, 225, 234, .95);
+            border-radius: 8px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,.96), rgba(255,255,255,.86));
+            box-shadow: 0 10px 26px rgba(23, 32, 51, .07);
+        }}
+        .action-card strong {{
+            display: block;
+            color: {INK};
+            font-size: 1.18rem;
+            margin-top: .35rem;
+        }}
+        .action-card span {{
+            color: {MUTED};
+            font-size: .82rem;
+            font-weight: 800;
+        }}
+        .danger-note {{
+            padding: .85rem .95rem;
+            border: 1px solid rgba(244, 91, 34, .28);
+            border-radius: 8px;
+            background: rgba(244, 91, 34, .08);
+            color: {ACCENT_DARK};
+            font-weight: 750;
+            line-height: 1.55;
+        }}
         .mobile-list {{
             display: none;
         }}
@@ -352,6 +387,9 @@ def inject_styles() -> None:
             }}
             .mobile-list {{
                 display: block;
+            }}
+            .action-grid {{
+                grid-template-columns: 1fr;
             }}
             div[data-testid="stDataFrame"] {{
                 display: none;
@@ -603,6 +641,35 @@ def delete_category(category_id: int) -> None:
         supabase.table("categories").delete().eq("id", int(category_id)).execute()
 
 
+def rename_category(category_id: int, old_name: str, new_name: str) -> None:
+    """カテゴリ名を変更し、既存データ内のカテゴリ文字列も更新します。"""
+    supabase.table("categories").update({"name": new_name.strip()}).eq("id", int(category_id)).execute()
+    reassign_category_references(old_name, new_name.strip())
+
+
+def reassign_category_references(old_name: str, new_name: str) -> None:
+    """取引・予算・定期収支に保存済みのカテゴリ名を付け替えます。"""
+    for table_name in ["transactions", "recurring_transactions"]:
+        try:
+            supabase.table(table_name).update({"category": new_name}).eq("category", old_name).execute()
+        except Exception:
+            pass
+
+    try:
+        supabase.table("budgets").update({"category": new_name}).eq("category", old_name).execute()
+    except Exception:
+        try:
+            supabase.table("budgets").delete().eq("category", old_name).execute()
+        except Exception:
+            pass
+
+
+def delete_category_with_reassignment(category_id: int, old_name: str, new_name: str) -> None:
+    """カテゴリに紐づくデータを移行してからカテゴリを削除します。"""
+    reassign_category_references(old_name, new_name)
+    delete_category(category_id)
+
+
 def save_budget(category: str, amount: int) -> None:
     """カテゴリ別の月次予算を保存します。"""
     supabase.table("budgets").upsert({"category": category, "amount": int(amount)}, on_conflict="category").execute()
@@ -829,11 +896,12 @@ def insight_card(title: str, value: str, note: str) -> None:
 
 def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str, date]:
     """サイドバーの代わりになる上部ナビゲーションと対象月選択を表示します。"""
-    pages = ["収支入力", "月間収支", "資産推移", "設定"]
+    pages = ["収支入力", "月間収支", "資産推移", "分析", "設定"]
     labels = {
         "収支入力": "入力",
         "月間収支": "月間",
         "資産推移": "推移",
+        "分析": "分析",
         "設定": "設定",
     }
 
@@ -855,54 +923,43 @@ def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str
     return reverse_labels[page_label], selected_month
 
 
-def mobile_card(title: str, amount: str, chips: list[str], body: str = "") -> str:
-    """スマホ表示向けのカードHTMLを作成します。"""
-    chip_html = "".join(f'<span class="mobile-chip">{chip}</span>' for chip in chips if chip)
-    body_html = f'<div class="metric-sub">{body}</div>' if body else ""
-    return f"""
-    <div class="mobile-card">
-        <div class="mobile-card-top">
-            <div class="mobile-card-title">{title}</div>
-            <div class="mobile-card-amount">{amount}</div>
-        </div>
-        <div class="mobile-card-meta">{chip_html}</div>
-        {body_html}
-    </div>
-    """
+def render_compact_card(title: str, amount: str, chips: list[str], body: str = "") -> None:
+    """HTMLを使わずにコンパクトな一覧カードを表示します。"""
+    with st.container(border=True):
+        cols = st.columns([1.7, 1])
+        cols[0].markdown(f"**{title}**")
+        cols[1].markdown(f"**{amount}**")
+        if chips:
+            st.caption(" / ".join(str(chip) for chip in chips if chip))
+        if body:
+            st.caption(body)
 
 
 def render_mobile_transaction_cards(data: pd.DataFrame, tx_type: str) -> None:
     """取引一覧をスマホ向けカードとして表示します。"""
     tx = data[data["type"] == tx_type].sort_values("date", ascending=False)
     if tx.empty:
-        st.markdown('<div class="mobile-list">', unsafe_allow_html=True)
         st.info("表示できるデータがありません。")
-        st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    cards = []
+    st.caption("カード表示")
     for _, row in tx.iterrows():
         source = "定期" if row.get("source") == "recurring" else "手入力"
         title = str(row.get("description") or row.get("category") or type_label(tx_type))
-        cards.append(
-            mobile_card(
-                title=title,
-                amount=yen(row["amount"]),
-                chips=[format_jp_date(row["date"]), str(row.get("category") or "未分類"), source],
-            )
+        render_compact_card(
+            title=title,
+            amount=yen(row["amount"]),
+            chips=[format_jp_date(row["date"]), str(row.get("category") or "未分類"), source],
         )
-    st.markdown(f'<div class="mobile-list">{"".join(cards)}</div>', unsafe_allow_html=True)
 
 
 def render_mobile_table_cards(df: pd.DataFrame, title_col: str, amount_col: str, meta_cols: list[str]) -> None:
     """汎用テーブルをスマホ向けカードとして表示します。"""
     if df.empty:
-        st.markdown('<div class="mobile-list">', unsafe_allow_html=True)
         st.info("表示できるデータがありません。")
-        st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    cards = []
+    st.caption("カード表示")
     for _, row in df.iterrows():
         amount = row[amount_col]
         amount_text = amount if isinstance(amount, str) else yen(amount)
@@ -912,23 +969,19 @@ def render_mobile_table_cards(df: pd.DataFrame, title_col: str, amount_col: str,
                 value = row[col]
                 value_text = value if isinstance(value, str) else yen(value)
                 chips.append(f"{col}: {value_text}")
-        cards.append(mobile_card(str(row[title_col]), amount_text, chips))
-    st.markdown(f'<div class="mobile-list">{"".join(cards)}</div>', unsafe_allow_html=True)
+        render_compact_card(str(row[title_col]), amount_text, chips)
 
 
 def render_mobile_info_cards(df: pd.DataFrame, title_col: str, value_col: str, meta_cols: list[str]) -> None:
     """金額以外の一覧をスマホ向けカードとして表示します。"""
     if df.empty:
-        st.markdown('<div class="mobile-list">', unsafe_allow_html=True)
         st.info("表示できるデータがありません。")
-        st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    cards = []
+    st.caption("カード表示")
     for _, row in df.iterrows():
         chips = [f"{col}: {row[col]}" for col in meta_cols if col in row and pd.notna(row[col])]
-        cards.append(mobile_card(str(row[title_col]), str(row[value_col]), chips))
-    st.markdown(f'<div class="mobile-list">{"".join(cards)}</div>', unsafe_allow_html=True)
+        render_compact_card(str(row[title_col]), str(row[value_col]), chips)
 
 
 def category_summary(month_df: pd.DataFrame, budgets_df: pd.DataFrame, categories: list[str], tx_type: str) -> pd.DataFrame:
@@ -1200,6 +1253,63 @@ def render_asset_page(transactions_df: pd.DataFrame, snapshots_df: pd.DataFrame,
     )
 
 
+def render_analysis_page(month_df: pd.DataFrame, budgets_df: pd.DataFrame, cat_df: pd.DataFrame) -> None:
+    """カテゴリ別の利用状況と予算差分を分析表示します。"""
+    st.markdown('<div class="section-title">カテゴリ分析</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-caption">支出の偏りと予算との差分を見ながら、カテゴリ整理の判断材料にできます。</div>', unsafe_allow_html=True)
+
+    expense = month_df[month_df["type"] == "expense"].groupby("category", as_index=False)["amount"].sum()
+    income = month_df[month_df["type"] == "income"].groupby("category", as_index=False)["amount"].sum()
+    total_expense = int(expense["amount"].sum()) if not expense.empty else 0
+    top_expense = expense.sort_values("amount", ascending=False).head(1)
+    top_name = str(top_expense["category"].iloc[0]) if not top_expense.empty else "なし"
+    top_share = int(top_expense["amount"].iloc[0] / total_expense * 100) if total_expense else 0
+
+    cols = st.columns(3)
+    with cols[0]:
+        metric_card("支出カテゴリ数", f"{len(expense)}件", "今月使われた支出カテゴリ")
+    with cols[1]:
+        metric_card("最大カテゴリ", top_name, f"支出全体の {top_share}%")
+    with cols[2]:
+        metric_card("未使用カテゴリ", f"{len(set(active_categories(cat_df, 'expense')) - set(expense['category'].tolist()))}件", "整理候補の目安")
+
+    st.divider()
+    left, right = st.columns(2)
+    with left:
+        st.markdown('<div class="section-title">支出ランキング</div>', unsafe_allow_html=True)
+        if expense.empty:
+            st.info("支出データがありません。")
+        else:
+            chart = (
+                alt.Chart(expense.sort_values("amount", ascending=False).head(10))
+                .mark_bar(color=ACCENT, cornerRadiusEnd=4)
+                .encode(
+                    x=alt.X("amount:Q", title="金額"),
+                    y=alt.Y("category:N", sort="-x", title="カテゴリ"),
+                    tooltip=[alt.Tooltip("category:N", title="カテゴリ"), alt.Tooltip("amount:Q", title="金額", format=",")],
+                )
+            )
+            st.altair_chart(chart, use_container_width=True)
+    with right:
+        st.markdown('<div class="section-title">収入ランキング</div>', unsafe_allow_html=True)
+        if income.empty:
+            st.info("収入データがありません。")
+        else:
+            chart = (
+                alt.Chart(income.sort_values("amount", ascending=False).head(10))
+                .mark_bar(color="#4dabf7", cornerRadiusEnd=4)
+                .encode(
+                    x=alt.X("amount:Q", title="金額"),
+                    y=alt.Y("category:N", sort="-x", title="カテゴリ"),
+                    tooltip=[alt.Tooltip("category:N", title="カテゴリ"), alt.Tooltip("amount:Q", title="金額", format=",")],
+                )
+            )
+            st.altair_chart(chart, use_container_width=True)
+
+    st.divider()
+    render_budget_table("カテゴリ別 予算差分", category_summary(month_df, budgets_df, active_categories(cat_df, "expense"), "expense"))
+
+
 def render_snapshot_settings(snapshots_df: pd.DataFrame) -> None:
     """基準残高の設定画面を表示します。"""
     st.subheader("基準残高")
@@ -1301,9 +1411,38 @@ def categories_display_frame(cat_df: pd.DataFrame) -> pd.DataFrame:
     return data[["ID", "カテゴリ名", "種別", "削除"]]
 
 
-def render_category_settings(cat_df: pd.DataFrame) -> None:
-    """カテゴリの追加・削除画面を表示します。"""
-    st.subheader("カテゴリ")
+def category_usage_counts(
+    category_name: str, transactions_df: pd.DataFrame, budgets_df: pd.DataFrame, recurring_df: pd.DataFrame
+) -> dict[str, int]:
+    """カテゴリ名に紐づく各テーブルの件数を集計します。"""
+    return {
+        "transactions": int((transactions_df["category"] == category_name).sum()) if "category" in transactions_df.columns else 0,
+        "budgets": int((budgets_df["category"] == category_name).sum()) if "category" in budgets_df.columns else 0,
+        "recurring": int((recurring_df["category"] == category_name).sum()) if "category" in recurring_df.columns else 0,
+    }
+
+
+def render_category_stats(cat_df: pd.DataFrame, transactions_df: pd.DataFrame, budgets_df: pd.DataFrame, recurring_df: pd.DataFrame) -> None:
+    """カテゴリ管理ページの利用状況サマリーを表示します。"""
+    active = cat_df[~cat_df["is_deleted"]]
+    total_tx = int(len(transactions_df))
+    linked_categories = transactions_df["category"].nunique() if "category" in transactions_df.columns and not transactions_df.empty else 0
+    recurring_count = int(len(recurring_df[~recurring_df["is_deleted"]])) if "is_deleted" in recurring_df.columns else int(len(recurring_df))
+    st.markdown(
+        f"""
+        <div class="action-grid">
+            <div class="action-card"><span>有効カテゴリ</span><strong>{len(active)}件</strong></div>
+            <div class="action-card"><span>取引レコード</span><strong>{total_tx}件</strong></div>
+            <div class="action-card"><span>使用中カテゴリ / 定期収支</span><strong>{linked_categories}種 / {recurring_count}件</strong></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_category_add_form(cat_df: pd.DataFrame) -> None:
+    """カテゴリ追加フォームを表示します。"""
+    st.subheader("カテゴリ追加")
     with st.form("category_form", clear_on_submit=True):
         cols = st.columns([1, 2])
         new_type_label = cols[0].segmented_control("種別", ["支出", "収入"], default="支出")
@@ -1319,22 +1458,124 @@ def render_category_settings(cat_df: pd.DataFrame) -> None:
                 st.success("カテゴリを追加しました。")
                 st.rerun()
 
+
+def render_category_rename_form(
+    cat_df: pd.DataFrame, transactions_df: pd.DataFrame, budgets_df: pd.DataFrame, recurring_df: pd.DataFrame
+) -> None:
+    """カテゴリ名変更フォームを表示します。"""
+    st.subheader("カテゴリ名変更")
+    active = cat_df[~cat_df["is_deleted"]].copy()
+    type_label_selected = st.segmented_control("種別", ["支出", "収入"], default="支出", key="rename_type")
+    tx_type = type_value(type_label_selected)
+    options = active[active["type"] == tx_type]["name"].tolist()
+    if not options:
+        st.info("変更できるカテゴリがありません。")
+        return
+
+    with st.form("category_rename_form"):
+        old_name = st.selectbox("変更するカテゴリ", options)
+        usage = category_usage_counts(old_name, transactions_df, budgets_df, recurring_df)
+        st.caption(f"紐づく取引 {usage['transactions']}件 / 予算 {usage['budgets']}件 / 定期収支 {usage['recurring']}件も同時に変更します。")
+        new_name = st.text_input("新しいカテゴリ名", value=old_name)
+        submitted = st.form_submit_button("カテゴリ名を変更", type="primary")
+        if submitted:
+            new_name = new_name.strip()
+            if not new_name:
+                st.error("新しいカテゴリ名を入力してください。")
+            elif new_name != old_name and new_name in active_categories(cat_df):
+                st.error("同じカテゴリ名が既にあります。")
+            elif new_name == old_name:
+                st.info("変更はありません。")
+            else:
+                category_id = int(active.loc[active["name"] == old_name, "id"].iloc[0])
+                rename_category(category_id, old_name, new_name)
+                st.success(f"{old_name} を {new_name} に変更しました。")
+                st.rerun()
+
+
+def render_category_delete_form(
+    cat_df: pd.DataFrame, transactions_df: pd.DataFrame, budgets_df: pd.DataFrame, recurring_df: pd.DataFrame
+) -> None:
+    """カテゴリ削除時のデータ移行フォームを表示します。"""
+    st.subheader("カテゴリ削除・データ移行")
+    st.markdown(
+        '<div class="danger-note">削除するカテゴリに紐づく取引・予算・定期収支は、選択した移行先カテゴリへ付け替えてから削除します。</div>',
+        unsafe_allow_html=True,
+    )
+    active = cat_df[~cat_df["is_deleted"]].copy()
+    type_label_selected = st.segmented_control("種別", ["支出", "収入"], default="支出", key="delete_type")
+    tx_type = type_value(type_label_selected)
+    options = active[active["type"] == tx_type]["name"].tolist()
+    if not options:
+        st.info("削除できるカテゴリがありません。")
+        return
+
+    with st.form("category_delete_reassign_form"):
+        old_name = st.selectbox("削除するカテゴリ", options)
+        usage = category_usage_counts(old_name, transactions_df, budgets_df, recurring_df)
+        st.caption(f"移行対象: 取引 {usage['transactions']}件 / 予算 {usage['budgets']}件 / 定期収支 {usage['recurring']}件")
+        mode = st.radio("移行先", ["既存カテゴリ", "新規カテゴリを作成"], horizontal=True)
+
+        target_name = ""
+        if mode == "既存カテゴリ":
+            target_options = [name for name in options if name != old_name]
+            if not target_options:
+                st.warning("同じ種別の移行先カテゴリがありません。新規カテゴリを作成してください。")
+            else:
+                target_name = st.selectbox("移行先カテゴリ", target_options)
+        else:
+            target_name = st.text_input("新規カテゴリ名")
+
+        confirm = st.checkbox("紐づくデータを移行してから削除する")
+        submitted = st.form_submit_button("移行してカテゴリを削除", type="primary")
+        if submitted:
+            target_name = target_name.strip()
+            if not confirm:
+                st.error("確認チェックを入れてください。")
+            elif not target_name:
+                st.error("移行先カテゴリを指定してください。")
+            elif target_name == old_name:
+                st.error("削除するカテゴリ自身は移行先にできません。")
+            elif mode == "新規カテゴリを作成" and target_name in active_categories(cat_df):
+                st.error("同じカテゴリ名が既にあります。")
+            else:
+                if mode == "新規カテゴリを作成":
+                    save_category(target_name, tx_type)
+                category_id = int(active.loc[active["name"] == old_name, "id"].iloc[0])
+                delete_category_with_reassignment(category_id, old_name, target_name)
+                st.success(f"{old_name} のデータを {target_name} に移行して削除しました。")
+                st.rerun()
+
+
+def render_category_list(cat_df: pd.DataFrame) -> None:
+    """カテゴリ一覧を表示します。"""
+    st.subheader("カテゴリ一覧")
     category_cards = categories_display_frame(cat_df)
     render_mobile_info_cards(category_cards, "カテゴリ名", "種別", [])
-    edited = st.data_editor(
-        category_cards,
-        key="category_editor",
+    st.dataframe(
+        category_cards.drop(columns=["削除"]),
+        key="category_list",
         use_container_width=True,
         hide_index=True,
-        disabled=["ID", "カテゴリ名", "種別"],
-        column_config={"ID": None, "削除": st.column_config.CheckboxColumn("削除")},
+        column_config={"ID": None},
     )
-    delete_ids = edited.loc[edited["削除"], "ID"].astype(int).tolist()
-    if st.button(f"チェックしたカテゴリを削除（{len(delete_ids)}件）", disabled=not delete_ids):
-        for category_id in delete_ids:
-            delete_category(category_id)
-        st.success(f"{len(delete_ids)}件のカテゴリを削除しました。")
-        st.rerun()
+
+
+def render_category_settings(
+    cat_df: pd.DataFrame, transactions_df: pd.DataFrame, budgets_df: pd.DataFrame, recurring_df: pd.DataFrame
+) -> None:
+    """カテゴリの追加・名称変更・削除移行画面を表示します。"""
+    st.subheader("カテゴリ")
+    render_category_stats(cat_df, transactions_df, budgets_df, recurring_df)
+    tabs = st.tabs(["追加", "名称変更", "削除・移行", "一覧"])
+    with tabs[0]:
+        render_category_add_form(cat_df)
+    with tabs[1]:
+        render_category_rename_form(cat_df, transactions_df, budgets_df, recurring_df)
+    with tabs[2]:
+        render_category_delete_form(cat_df, transactions_df, budgets_df, recurring_df)
+    with tabs[3]:
+        render_category_list(cat_df)
 
 
 def render_budget_settings(cat_df: pd.DataFrame, budgets_df: pd.DataFrame) -> None:
@@ -1364,7 +1605,12 @@ def render_budget_settings(cat_df: pd.DataFrame, budgets_df: pd.DataFrame) -> No
 
 
 def render_settings_page(
-    snapshots_df: pd.DataFrame, recurring_df: pd.DataFrame, cat_df: pd.DataFrame, budgets_df: pd.DataFrame, selected_month: date
+    snapshots_df: pd.DataFrame,
+    recurring_df: pd.DataFrame,
+    cat_df: pd.DataFrame,
+    budgets_df: pd.DataFrame,
+    transactions_df: pd.DataFrame,
+    selected_month: date,
 ) -> None:
     """設定ページのサブメニューを表示します。"""
     st.markdown('<div class="section-title">設定</div>', unsafe_allow_html=True)
@@ -1376,7 +1622,7 @@ def render_settings_page(
     elif setting_page == "定期収支":
         render_recurring_settings(recurring_df, cat_df, selected_month)
     elif setting_page == "カテゴリ":
-        render_category_settings(cat_df)
+        render_category_settings(cat_df, transactions_df, budgets_df, recurring_df)
     elif setting_page == "予算":
         render_budget_settings(cat_df, budgets_df)
 
@@ -1445,8 +1691,10 @@ def main() -> None:
         render_monthly_page(month_df, budgets_df, cat_df, opening, ending, selected_month)
     elif page == "資産推移":
         render_asset_page(full_transactions_df, snapshots_df, selected_month)
+    elif page == "分析":
+        render_analysis_page(month_df, budgets_df, cat_df)
     elif page == "設定":
-        render_settings_page(snapshots_df, recurring_df, cat_df, budgets_df, selected_month)
+        render_settings_page(snapshots_df, recurring_df, cat_df, budgets_df, transactions_df, selected_month)
 
 
 if __name__ == "__main__":
