@@ -1,210 +1,256 @@
-from datetime import date
+from __future__ import annotations
 
+from datetime import date
+from typing import Any
+
+import altair as alt
+import httpx
 import pandas as pd
 import streamlit as st
-import httpx
 from postgrest.exceptions import APIError
 from supabase import create_client
-import altair as alt
-import datetime
-from supabase import create_client
-import os
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-today = datetime.date.today()
-
-
-
-st.markdown("""
-<style>
-
-/* 背景グラデーション */
-.stApp {
-    background: linear-gradient(135deg, #f5f7fa, #e4ecf7);
-}
-
-/* ヘッダー */
-.app-header {
-    font-size: 28px;
-    font-weight: 800;
-    padding: 10px 0;
-    color: #1f2937;
-}
-
-/* KPIカード */
-.kpi-card {
-    background: white;
-    border-radius: 16px;
-    padding: 18px;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.08);
-    text-align: center;
-}
-
-.kpi-value {
-    font-size: 26px;
-    font-weight: bold;
-}
-
-.kpi-label {
-    font-size: 13px;
-    color: #6b7280;
-}
-
-/* ホバーで浮く */
-.card:hover {
-    transform: translateY(-3px);
-    transition: 0.2s;
-}
-
-/* ボタン改善 */
-.stButton > button {
-    background: linear-gradient(135deg, #f45b22, #ff7b54);
-    color: white;
-    border: none;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# =========================
-# 🔐 ログイン
-# =========================
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
-if not st.session_state.authenticated:
-    st.title("🔐 ログイン")
-
-    password = st.text_input("パスワードを入力してください", type="password")
-
-    if st.button("ログイン"):
-        if password == st.secrets["APP_PASSWORD"]:
-            st.session_state.authenticated = True
-            st.rerun()
-        else:
-            st.error("パスワードが違います")
-
-    st.stop()
 
 st.set_page_config(page_title="資産管理アプリ", page_icon="💰", layout="wide")
 
+
 ACCENT = "#f45b22"
+ACCENT_DARK = "#d9480f"
+INK = "#172033"
 NAVY = "#30475e"
-MUTED = "#6b7c8f"
+MUTED = "#687386"
+SURFACE = "#ffffff"
+SOFT = "#f4f6f8"
+LINE = "#dbe1ea"
 TYPE_LABELS = {"expense": "支出", "income": "収入"}
 TYPE_VALUES = {"支出": "expense", "収入": "income"}
-TABLE_COLUMNS = {
-    "categories": "id,name,type",
-    "transactions": "id,date,type,amount,category,description",
-    "budgets": "id,category,amount",
-    "balance_snapshots": "id,snapshot_month,balance,created_at",
-    "recurring_transactions": "id,day,type,amount,category,description,start_month,end_month,active,created_at",
-}
 
-st.markdown(
-    f"""
-    <style>
-    .stApp {{ background: #fbfbfa; }}
-    h1, h2, h3 {{ letter-spacing: 0; }}
-    .sheet-title {{
-        color: {ACCENT};
-        font-size: 2.1rem;
-        font-weight: 800;
-        margin: 0 0 .5rem;
-    }}
-    .sheet-caption {{
-        color: {MUTED};
-        font-size: .95rem;
-        margin-bottom: 1rem;
-    }}
-    .claim-box {{
-        display: inline-flex;
-        gap: .75rem;
-        align-items: center;
-        background: #f1f2f4;
-        color: #111827;
-        font-weight: 700;
-        padding: .25rem .5rem;
-        margin: .25rem 0 1rem;
-    }}
-    .budget-card {{
-        border: 1px solid #d7dbe0;
-        background: #eef0f2;
-        padding: 2rem;
-        text-align: center;
-        min-height: 210px;
-    }}
-    .budget-card .big {{
-        color: {NAVY};
-        font-size: 2.5rem;
-        font-weight: 700;
-        line-height: 1.1;
-    }}
-    .budget-card .label {{
-        color: {MUTED};
-        font-weight: 700;
-        margin-top: .25rem;
-    }}
-    .budget-card hr {{
-        width: 65%;
-        border: 0;
-        border-top: 2px dotted #b8bec6;
-        margin: 1.3rem auto;
-    }}
-    div[data-testid="stMetricValue"] {{ color: {NAVY}; }}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+
+def inject_styles() -> None:
+    """アプリ全体の見た目を整えるCSSを注入します。"""
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background:
+                radial-gradient(circle at top left, rgba(244, 91, 34, .12), transparent 30rem),
+                linear-gradient(135deg, #f8fafc 0%, #edf2f7 48%, #fff7f2 100%);
+            color: {INK};
+        }}
+        h1, h2, h3, label {{ letter-spacing: 0; }}
+        section[data-testid="stSidebar"] {{
+            background: rgba(255, 255, 255, .82);
+            border-right: 1px solid rgba(219, 225, 234, .9);
+        }}
+        .block-container {{
+            padding-top: 1.6rem;
+            padding-bottom: 3rem;
+        }}
+        .app-hero {{
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1.3rem 1.45rem;
+            margin-bottom: 1.2rem;
+            color: white;
+            background:
+                linear-gradient(135deg, rgba(23, 32, 51, .92), rgba(48, 71, 94, .86)),
+                linear-gradient(135deg, {ACCENT}, #ffb86b);
+            border: 1px solid rgba(255, 255, 255, .35);
+            border-radius: 8px;
+            box-shadow: 0 18px 45px rgba(23, 32, 51, .16);
+        }}
+        .app-hero h1 {{
+            margin: 0;
+            font-size: 2rem;
+            line-height: 1.1;
+            color: white;
+        }}
+        .app-hero p {{
+            margin: .35rem 0 0;
+            color: rgba(255, 255, 255, .78);
+        }}
+        .hero-month {{
+            text-align: right;
+            color: rgba(255, 255, 255, .88);
+            font-weight: 700;
+            white-space: nowrap;
+        }}
+        .section-title {{
+            color: {INK};
+            font-size: 1.35rem;
+            font-weight: 800;
+            margin: .5rem 0 .65rem;
+        }}
+        .section-caption {{
+            color: {MUTED};
+            font-size: .95rem;
+            margin: -.25rem 0 1rem;
+        }}
+        .metric-card {{
+            min-height: 118px;
+            padding: 1rem 1.1rem;
+            border: 1px solid rgba(219, 225, 234, .95);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, .88);
+            box-shadow: 0 12px 30px rgba(23, 32, 51, .08);
+        }}
+        .metric-label {{
+            color: {MUTED};
+            font-size: .84rem;
+            font-weight: 700;
+            margin-bottom: .35rem;
+        }}
+        .metric-value {{
+            color: {NAVY};
+            font-size: 1.7rem;
+            font-weight: 850;
+            line-height: 1.12;
+            overflow-wrap: anywhere;
+        }}
+        .metric-sub {{
+            color: {MUTED};
+            font-size: .8rem;
+            margin-top: .4rem;
+        }}
+        .panel {{
+            padding: 1.15rem;
+            border: 1px solid rgba(219, 225, 234, .95);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, .86);
+            box-shadow: 0 10px 26px rgba(23, 32, 51, .07);
+        }}
+        .status-pill {{
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            padding: .25rem .55rem;
+            border-radius: 999px;
+            background: rgba(244, 91, 34, .12);
+            color: {ACCENT_DARK};
+            font-size: .82rem;
+            font-weight: 800;
+        }}
+        .stButton > button, .stFormSubmitButton > button {{
+            border: 0;
+            border-radius: 8px;
+            color: white;
+            background: linear-gradient(135deg, {ACCENT}, #ff855c);
+            box-shadow: 0 8px 18px rgba(244, 91, 34, .22);
+            font-weight: 750;
+        }}
+        .stButton > button:hover, .stFormSubmitButton > button:hover {{
+            border: 0;
+            color: white;
+            background: linear-gradient(135deg, {ACCENT_DARK}, {ACCENT});
+        }}
+        div[data-testid="stMetricValue"] {{ color: {NAVY}; }}
+        div[data-testid="stDataFrame"] {{
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        @media (max-width: 720px) {{
+            .app-hero {{ display: block; }}
+            .hero-month {{ text-align: left; margin-top: .75rem; }}
+            .metric-value {{ font-size: 1.35rem; }}
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 @st.cache_resource
 def get_supabase_client():
+    """Streamlit secretsからSupabaseクライアントを作成してキャッシュします。"""
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 
+def require_login() -> None:
+    """アプリ共通の簡易パスワード認証を実行します。"""
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if st.session_state.authenticated:
+        return
+
+    st.title("ログイン")
+    password = st.text_input("パスワードを入力してください", type="password")
+    if st.button("ログイン"):
+        if password == st.secrets["APP_PASSWORD"]:
+            st.session_state.authenticated = True
+            st.rerun()
+        st.error("パスワードが違います")
+    st.stop()
+
+
 def yen(value: float | int) -> str:
+    """数値を日本円表記へ変換します。"""
     return f"¥{int(value):,}"
 
 
-def type_label(value: str) -> str:
-    return TYPE_LABELS.get(value, value)
-
-
-def type_value(label: str) -> str:
-    return TYPE_VALUES.get(label, label)
-
-
 def first_day(value: date | pd.Timestamp) -> date:
+    """指定日の月初日を返します。"""
     return pd.to_datetime(value).date().replace(day=1)
 
 
 def month_range(value: date | pd.Timestamp) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """指定月の開始日と終了日をTimestampで返します。"""
     start = pd.Timestamp(first_day(value))
-    end = start + pd.offsets.MonthEnd(0)
-    return start, end
+    return start, start + pd.offsets.MonthEnd(0)
 
 
 def month_label(value: date | pd.Timestamp) -> str:
-    value = pd.Timestamp(value)
-    return f"{value.year}年{value.month}月"
+    """年月を日本語の表示ラベルに変換します。"""
+    ts = pd.Timestamp(value)
+    return f"{ts.year}年{ts.month}月"
+
+
+def format_month(ts: pd.Timestamp) -> str:
+    """Timestampを年/月の短い日本語ラベルへ変換します。"""
+    return f"{ts.year}年{ts.month}月"
+
+
+def format_jp_date(value: Any) -> str:
+    """日付を年月日の日本語表記へ変換します。"""
+    ts = pd.Timestamp(value)
+    return f"{ts.year}年{ts.month}月{ts.day}日"
+
+
+def type_label(value: str) -> str:
+    """DB上の収支タイプを画面表示ラベルへ変換します。"""
+    return TYPE_LABELS.get(value, value)
+
+
+def type_value(label: str) -> str:
+    """画面表示ラベルをDB上の収支タイプへ変換します。"""
+    return TYPE_VALUES.get(label, label)
 
 
 def month_selector(label: str, key: str, default: date | None = None) -> date:
+    """年と月のセレクトボックスで対象月を選択します。"""
     default = first_day(default or date.today())
     years = list(range(default.year - 5, default.year + 6))
-    cols = st.columns([1, 1])
-    year = cols[0].selectbox(f"年", years, index=years.index(default.year), key=f"{key}_year")
-    month = cols[1].selectbox(f"月", list(range(1, 13)), index=default.month - 1, key=f"{key}_month")
+    st.caption(label)
+    cols = st.columns(2)
+    year = cols[0].selectbox("年", years, index=years.index(default.year), key=f"{key}_year")
+    month = cols[1].selectbox("月", list(range(1, 13)), index=default.month - 1, key=f"{key}_month")
     return date(int(year), int(month), 1)
 
 
+def ensure_columns(df: pd.DataFrame, defaults: dict[str, Any]) -> pd.DataFrame:
+    """不足している列をデフォルト値で補完します。"""
+    result = df.copy()
+    for column, default in defaults.items():
+        if column not in result.columns:
+            result[column] = default
+    return result
+
+
 def load_table(table_name: str, limit: int = 10000) -> pd.DataFrame:
-    columns = TABLE_COLUMNS.get(table_name, "*")
-    query = supabase.table(table_name).select(columns).limit(limit)
+    """Supabaseからテーブルを読み込みDataFrameに変換します。"""
+    query = supabase.table(table_name).select("*").limit(limit)
     if table_name == "transactions":
         query = query.order("date", desc=False)
     response = query.execute()
@@ -212,736 +258,367 @@ def load_table(table_name: str, limit: int = 10000) -> pd.DataFrame:
 
 
 def load_optional_table(table_name: str) -> tuple[pd.DataFrame, bool]:
+    """存在しない可能性のあるテーブルを安全に読み込みます。"""
     try:
         return load_table(table_name), True
-    except APIError:
-        return pd.DataFrame(), False
-    except httpx.TimeoutException:
+    except (APIError, httpx.TimeoutException, Exception):
         return pd.DataFrame(), False
 
 
-def load_table_or_empty(table_name):
-    import pandas as pd
+def normalize_categories(data: pd.DataFrame) -> pd.DataFrame:
+    """カテゴリデータの欠損列と削除フラグを整えます。"""
+    columns = {"id": pd.NA, "name": "", "type": "expense", "is_deleted": False}
+    data = ensure_columns(data, columns)
+    data["is_deleted"] = data["is_deleted"].fillna(False).astype(bool)
+    return data.dropna(subset=["id", "name"]).sort_values("id")
 
-    try:
-        res = supabase.table(table_name).select("*").execute()
-        df = pd.DataFrame(res.data)
 
-        # 👇 これ追加（最重要）
-        if table_name == "recurring_transactions" and df.empty:
-            df = pd.DataFrame(columns=[
-                "id",
-                "type",
-                "amount",
-                "category",
-                "description",
-                "start_month",
-                "end_month"
-            ])
-
-        return df
-
-    except Exception as e:
-        print(f"[load error] {table_name}:", e)
-        return pd.DataFrame()
-    
-def safe_update_transaction(row):
-
-    import pandas as pd
-
-    # =========================
-    # 🔥 強制的に整数化
-    # =========================
-    raw = row["amount_new"]
-
-    # 文字列でもfloatでも全部潰す
-    raw_str = str(raw).replace(",", "").strip()
-
-    try:
-        amount = int(float(raw_str))
-    except Exception as e:
-        print("変換エラー:", raw, e)
-        amount = 0
-
-    # 念のため最終確認
-    print("送信値:", amount, type(amount))
-
-    # =========================
-    # 文字列安全化
-    # =========================
-    category = str(row["category_new"]) if pd.notna(row["category_new"]) else ""
-    description = str(row["description_new"]) if pd.notna(row["description_new"]) else ""
-
-    # =========================
-    # DB更新
-    # =========================
-    supabase.table("transactions") \
-        .update({
-            "amount": amount,
-            "category": category,
-            "description": description
-        }) \
-        .eq("id", int(row["id"])) \
-        .execute()
-    
 def normalize_transactions(data: pd.DataFrame) -> pd.DataFrame:
-    if data.empty:
-        return pd.DataFrame(columns=["id", "date", "type", "amount", "category", "description", "signed_amount"])
-
-    data = data.copy()
-    data["date"] = pd.to_datetime(data["date"], errors="coerce")
-    data["amount"] = pd.to_numeric(data["amount"], errors="coerce").fillna(0)
-    if "description" not in data.columns:
-        data["description"] = ""
-    data["description"] = data["description"].fillna("")
-    data["signed_amount"] = data.apply(
-        lambda row: row["amount"] if row["type"] == "income" else -row["amount"],
-        axis=1,
+    """取引データの日付・金額・符号付き金額を整えます。"""
+    data = ensure_columns(
+        data,
+        {"id": pd.NA, "date": pd.NaT, "type": "expense", "amount": 0, "category": "", "description": ""},
     )
+    data["date"] = pd.to_datetime(data["date"], errors="coerce").dt.normalize()
+    data["amount"] = pd.to_numeric(data["amount"], errors="coerce").fillna(0).astype(int)
+    data["description"] = data["description"].fillna("")
+    data["category"] = data["category"].fillna("")
+    data["signed_amount"] = data.apply(lambda row: row["amount"] if row["type"] == "income" else -row["amount"], axis=1)
     return data.dropna(subset=["date"])
 
-def update_transaction(id, amount, category, description):
-
-    supabase.table("transactions") \
-        .update({
-            "amount": amount,
-            "category": category,
-            "description": description
-        }) \
-        .eq("id", id) \
-        .execute()
-def render_transaction_editor(month_df, category_list):
-
-    import streamlit as st
-    import pandas as pd
-
-    if month_df.empty:
-        st.info("データがありません")
-        return
-
-    editable_df = month_df.copy()
-
-    # =========================
-    # エディタ
-    # =========================
-    edited_df = st.data_editor(
-        editable_df,
-        num_rows="fixed",
-        width="stretch",
-        disabled=["id", "date"],
-        column_config={
-            "amount": st.column_config.NumberColumn("金額", step=1),
-            "category": st.column_config.SelectboxColumn("カテゴリ", options=category_list),
-            "description": st.column_config.TextColumn("説明"),
-        }
-    )
-
-    # =========================
-    # 保存処理
-    # =========================
-    if st.button("変更を保存", key="edit_save"):
-
-        # =========================
-        # マージ
-        # =========================
-        merged = edited_df.merge(
-            month_df,
-            on="id",
-            suffixes=("_new", "_old")
-        )
-
-        # =========================
-        # 🔥 型統一（超重要）
-        # =========================
-        merged["amount_new"] = pd.to_numeric(merged["amount_new"], errors="coerce").fillna(0)
-        merged["amount_old"] = pd.to_numeric(merged["amount_old"], errors="coerce").fillna(0)
-
-        merged["description_new"] = merged["description_new"].fillna("")
-        merged["description_old"] = merged["description_old"].fillna("")
-
-        # intで比較（これが本質）
-        merged["amount_new_int"] = merged["amount_new"].astype(int)
-        merged["amount_old_int"] = merged["amount_old"].astype(int)
-
-        # =========================
-        # 差分判定
-        # =========================
-        changed = merged[
-            (merged["amount_new_int"] != merged["amount_old_int"]) |
-            (merged["category_new"] != merged["category_old"]) |
-            (merged["description_new"] != merged["description_old"])
-        ]
-
-        update_count = 0
-
-        # =========================
-        # 更新
-        # =========================
-        for _, row in changed.iterrows():
-
-            if pd.isna(row["id"]):
-                continue
-
-            amount = int(row["amount_new_int"])
-            category = str(row["category_new"]) if pd.notna(row["category_new"]) else ""
-            description = str(row["description_new"]) if pd.notna(row["description_new"]) else ""
-
-            supabase.table("transactions") \
-                .update({
-                    "amount": amount,
-                    "category": category,
-                    "description": description
-                }) \
-                .eq("id", int(row["id"])) \
-                .execute()
-
-            update_count += 1
-
-        if update_count > 0:
-            st.success(f"{update_count}件更新しました")
-        else:
-            st.info("変更はありません")
-
-        st.rerun()
 
 def normalize_budgets(data: pd.DataFrame) -> pd.DataFrame:
-    if data.empty:
-        return pd.DataFrame(columns=["id", "category", "amount"])
-
-    data = data.copy()
-    data["amount"] = pd.to_numeric(data["amount"], errors="coerce").fillna(0)
-
+    """予算データの金額を数値化します。"""
+    data = ensure_columns(data, {"id": pd.NA, "category": "", "amount": 0})
+    data["amount"] = pd.to_numeric(data["amount"], errors="coerce").fillna(0).astype(int)
     return data
 
-def normalize_snapshots(data: pd.DataFrame) -> pd.DataFrame:
-    if data.empty:
-        return pd.DataFrame(columns=["id", "snapshot_month", "balance"])
 
-    data = data.copy()
+def normalize_snapshots(data: pd.DataFrame) -> pd.DataFrame:
+    """基準残高データの日付と金額を整えます。"""
+    data = ensure_columns(data, {"id": pd.NA, "snapshot_month": pd.NaT, "balance": 0})
     data["snapshot_month"] = pd.to_datetime(data["snapshot_month"], errors="coerce")
-    data["balance"] = pd.to_numeric(data["balance"], errors="coerce").fillna(0)
+    data["balance"] = pd.to_numeric(data["balance"], errors="coerce").fillna(0).astype(int)
     return data.dropna(subset=["snapshot_month"]).sort_values("snapshot_month")
 
 
 def normalize_recurring(data: pd.DataFrame) -> pd.DataFrame:
-    if data.empty:
-        return pd.DataFrame(
-            columns=["id", "day", "type", "amount", "category", "description", "start_month", "end_month", "active"]
-        )
-
-    data = data.copy()
-    data["day"] = pd.to_numeric(data["day"], errors="coerce").fillna(1).astype(int)
-    data["amount"] = pd.to_numeric(data["amount"], errors="coerce").fillna(0)
+    """定期収支データの期間・金額・削除フラグを整えます。"""
+    data = ensure_columns(
+        data,
+        {
+            "id": pd.NA,
+            "day": 1,
+            "type": "expense",
+            "amount": 0,
+            "category": "",
+            "description": "",
+            "start_month": pd.NaT,
+            "end_month": pd.NaT,
+            "active": True,
+            "is_deleted": False,
+        },
+    )
+    data["day"] = pd.to_numeric(data["day"], errors="coerce").fillna(1).astype(int).clip(1, 28)
+    data["amount"] = pd.to_numeric(data["amount"], errors="coerce").fillna(0).astype(int)
     data["start_month"] = pd.to_datetime(data["start_month"], errors="coerce")
     data["end_month"] = pd.to_datetime(data["end_month"], errors="coerce")
-    if "description" not in data.columns:
-        data["description"] = ""
-    if "active" not in data.columns:
-        data["active"] = True
     data["description"] = data["description"].fillna("")
-    data["active"] = data["active"].fillna(True)
+    data["active"] = data["active"].fillna(True).astype(bool)
+    data["is_deleted"] = data["is_deleted"].fillna(False).astype(bool)
     return data.dropna(subset=["start_month"])
 
 
-def save_transaction(tx_date: date, tx_type: str, category: str, amount: int, description: str):
+def save_transaction(tx_date: date | pd.Timestamp, tx_type: str, category: str, amount: int, description: str) -> None:
+    """取引を1件追加します。"""
     supabase.table("transactions").insert(
         {
-            "date": tx_date.isoformat(),
+            "date": pd.Timestamp(tx_date).date().isoformat(),
             "type": tx_type,
-            "amount": amount,
+            "amount": int(amount),
             "category": category,
-            "description": description.strip(),
+            "description": (description or "").strip(),
         }
     ).execute()
 
 
-def delete_transaction(transaction_id: int):
-    supabase.table("transactions").delete().eq("id", transaction_id).execute()
+def update_transaction(transaction_id: int, amount: int, category: str, description: str) -> None:
+    """取引の金額・カテゴリ・説明を更新します。"""
+    supabase.table("transactions").update(
+        {"amount": int(amount), "category": category, "description": description or ""}
+    ).eq("id", int(transaction_id)).execute()
 
 
-def save_budget(category: str, amount: int):
-    supabase.table("budgets").upsert(
-        {
-            "category": category,
-            "amount": amount
-        },
-        on_conflict="category"
+def delete_transaction(transaction_id: int) -> None:
+    """取引を1件削除します。"""
+    supabase.table("transactions").delete().eq("id", int(transaction_id)).execute()
+
+
+def save_category(name: str, category_type: str) -> None:
+    """カテゴリを1件追加します。"""
+    payload = {"name": name.strip(), "type": category_type, "is_deleted": False}
+    try:
+        supabase.table("categories").insert(payload).execute()
+    except Exception:
+        payload.pop("is_deleted")
+        supabase.table("categories").insert(payload).execute()
+
+
+def delete_category(category_id: int) -> None:
+    """カテゴリを論理削除し、列がない場合は物理削除にフォールバックします。"""
+    try:
+        supabase.table("categories").update({"is_deleted": True}).eq("id", int(category_id)).execute()
+    except Exception:
+        supabase.table("categories").delete().eq("id", int(category_id)).execute()
+
+
+def save_budget(category: str, amount: int) -> None:
+    """カテゴリ別の月次予算を保存します。"""
+    supabase.table("budgets").upsert({"category": category, "amount": int(amount)}, on_conflict="category").execute()
+
+
+def save_balance_snapshot(snapshot_month: date, balance: int) -> None:
+    """基準残高を単一レコードとして保存し直します。"""
+    supabase.table("balance_snapshots").delete().neq("id", 0).execute()
+    supabase.table("balance_snapshots").insert(
+        {"snapshot_month": first_day(snapshot_month).isoformat(), "balance": int(balance)}
     ).execute()
 
 
-def save_category(name: str, category_type: str):
-    supabase.table("categories").insert({"name": name.strip(), "type": category_type}).execute()
-
-
-def delete_category(category_id: int):
-    supabase.table("categories").delete().eq("id", category_id).execute()
-
-
-def save_balance_snapshot(snapshot_month: date, balance: int):
-    # 既存全部削除
-    supabase.table("balance_snapshots").delete().neq("id", 0).execute()
-
-    # 新規追加
-    supabase.table("balance_snapshots").insert({
-        "snapshot_month": snapshot_month.isoformat(),
-        "balance": balance
-    }).execute()
-
-
-def save_recurring(type, amount, category, desc, start_month, end_month):
-
-    supabase.table("recurring_transactions").insert({
-        "type": type,
-        "amount": amount,
+def save_recurring(tx_type: str, day: int, amount: int, category: str, desc: str, start_month: pd.Timestamp, end_month) -> None:
+    """定期収支を1件追加します。"""
+    payload = {
+        "day": int(day),
+        "type": tx_type,
+        "amount": int(amount),
         "category": category,
-        "description": desc,
-        "start_month": start_month.strftime("%Y-%m-%d"),
-        "end_month": end_month.strftime("%Y-%m-%d") if end_month else None
-    }).execute()
+        "description": desc or "",
+        "start_month": pd.Timestamp(start_month).strftime("%Y-%m-%d"),
+        "end_month": pd.Timestamp(end_month).strftime("%Y-%m-%d") if end_month is not None else None,
+        "active": True,
+        "is_deleted": False,
+    }
+    try:
+        supabase.table("recurring_transactions").insert(payload).execute()
+    except Exception:
+        payload.pop("is_deleted", None)
+        supabase.table("recurring_transactions").insert(payload).execute()
 
-def delete_recurring(recurring_id, delete_mode):
 
-    now = pd.Timestamp.today().strftime("%Y-%m-%d")
+def update_recurring(recurring_id: int, end_month) -> None:
+    """定期収支の終了月を更新します。"""
+    end_month_str = pd.Timestamp(end_month).strftime("%Y-%m-%d") if pd.notna(end_month) else None
+    supabase.table("recurring_transactions").update({"end_month": end_month_str}).eq("id", int(recurring_id)).execute()
 
+
+def delete_recurring(recurring_id: int, delete_mode: str, selected_month: date) -> None:
+    """定期収支を全削除または指定月以降停止にします。"""
     if delete_mode == "all":
-        supabase.table("recurring_transactions") \
-            .update({
-                "is_deleted": True,
-                "deleted_at": now
-            }) \
-            .eq("id", int(recurring_id)) \
-            .execute()
+        try:
+            supabase.table("recurring_transactions").update({"is_deleted": True}).eq("id", int(recurring_id)).execute()
+        except Exception:
+            supabase.table("recurring_transactions").delete().eq("id", int(recurring_id)).execute()
+        return
 
-    elif delete_mode == "future":
-        this_month = pd.Timestamp.today().replace(day=1)
+    stop_month = pd.Timestamp(selected_month).to_period("M").to_timestamp()
+    supabase.table("recurring_transactions").update({"end_month": stop_month.strftime("%Y-%m-%d")}).eq(
+        "id", int(recurring_id)
+    ).execute()
 
-        supabase.table("recurring_transactions") \
-            .update({
-                "end_month": this_month.strftime("%Y-%m-%d")
-            }) \
-            .eq("id", int(recurring_id)) \
-            .execute()
-        
-def apply_recurring(month_df, recurring_df, selected_month):
 
-    import pandas as pd
+def active_categories(cat_df: pd.DataFrame, tx_type: str | None = None) -> list[str]:
+    """有効なカテゴリ名を種別で絞り込んで返します。"""
+    data = cat_df[~cat_df["is_deleted"]]
+    if tx_type:
+        data = data[data["type"] == tx_type]
+    return data["name"].dropna().tolist()
 
-    if recurring_df is None or recurring_df.empty:
+
+def apply_recurring(month_df: pd.DataFrame, recurring_df: pd.DataFrame, selected_month: date) -> pd.DataFrame:
+    """指定月の表示用データに定期収支を合成します。"""
+    if recurring_df.empty:
         return month_df
 
-    # 削除済み除外（ここ重要）
-    recurring_df = recurring_df[
-        (recurring_df["is_deleted"].isna()) | (recurring_df["is_deleted"] == False)
-    ]
+    current = pd.Timestamp(selected_month).to_period("M").to_timestamp()
+    rows: list[dict[str, Any]] = []
+    active = recurring_df[(recurring_df["active"]) & (~recurring_df["is_deleted"])]
 
-    current_month = pd.to_datetime(selected_month).to_period("M").to_timestamp()
-
-    rows = []
-
-    for _, row in recurring_df.iterrows():
-
-        start = pd.to_datetime(row["start_month"])
-        end = pd.to_datetime(row["end_month"]) if pd.notnull(row["end_month"]) else None
-
-        if start <= current_month and (end is None or current_month <= end):
-
-            rows.append({
-                "date": current_month,
-                "type": row["type"],
-                "category": row["category"],
-                "amount": int(row["amount"]),
-                "description": row.get("description", "定期")
-            })
+    for _, row in active.iterrows():
+        start = pd.Timestamp(row["start_month"]).to_period("M").to_timestamp()
+        end = pd.Timestamp(row["end_month"]).to_period("M").to_timestamp() if pd.notna(row["end_month"]) else None
+        if start <= current and (end is None or current <= end):
+            rows.append(
+                {
+                    "id": pd.NA,
+                    "date": current.replace(day=int(row["day"])),
+                    "type": row["type"],
+                    "category": row["category"],
+                    "amount": int(row["amount"]),
+                    "description": row.get("description") or "定期",
+                    "signed_amount": int(row["amount"]) if row["type"] == "income" else -int(row["amount"]),
+                    "source": "recurring",
+                }
+            )
 
     if not rows:
         return month_df
 
-    recurring_month_df = pd.DataFrame(rows)
-
-    # 重複防止（超重要）
-    combined = pd.concat([month_df, recurring_month_df], ignore_index=True)
-    combined = combined.drop_duplicates(
-        subset=["date", "type", "category", "amount", "description"]
-    )
-
-    return combined
-
-def format_jp_date(value: pd.Timestamp) -> str:
-    return f"{value.year}年{value.month}月{value.day}日"
+    base = month_df.copy()
+    base["source"] = "manual"
+    combined = pd.concat([base, pd.DataFrame(rows)], ignore_index=True)
+    return combined.drop_duplicates(subset=["date", "type", "category", "amount", "description"])
 
 
-def display_transactions(data: pd.DataFrame, tx_type: str) -> pd.DataFrame:
-    if data.empty:
-        return pd.DataFrame(columns=["日付", "金額", "説明", "カテゴリ"])
+def expand_recurring_transactions(transactions_df: pd.DataFrame, recurring_df: pd.DataFrame, until_month: date) -> pd.DataFrame:
+    """資産計算用に定期収支を過去から対象月まで展開します。"""
+    result = transactions_df.copy()
+    if recurring_df.empty:
+        return result
 
-    result = data.loc[data["type"] == tx_type, ["date", "amount", "description", "category"]].sort_values(
-        "date", ascending=False
-    )
-    if result.empty:
-        return pd.DataFrame(columns=["日付", "金額", "説明", "カテゴリ"])
+    rows: list[dict[str, Any]] = []
+    until = pd.Timestamp(until_month).to_period("M").to_timestamp()
+    active = recurring_df[(recurring_df["active"]) & (~recurring_df["is_deleted"])]
 
-    result = result.copy()
-    result["日付"] = result["date"].apply(format_jp_date)
-    result["金額"] = result["amount"].apply(yen)
-    result = result.rename(columns={"description": "説明", "category": "カテゴリ"})
-    return result[["日付", "金額", "説明", "カテゴリ"]]
+    for _, row in active.iterrows():
+        start = pd.Timestamp(row["start_month"]).to_period("M").to_timestamp()
+        end = pd.Timestamp(row["end_month"]).to_period("M").to_timestamp() if pd.notna(row["end_month"]) else until
+        end = min(end, until)
+        for month in pd.date_range(start=start, end=end, freq="MS"):
+            amount = int(row["amount"])
+            rows.append(
+                {
+                    "id": pd.NA,
+                    "date": month.replace(day=int(row["day"])),
+                    "type": row["type"],
+                    "amount": amount,
+                    "category": row["category"],
+                    "description": row.get("description") or "定期",
+                    "signed_amount": amount if row["type"] == "income" else -amount,
+                }
+            )
 
-
-def transactions_display_frame(data: pd.DataFrame) -> pd.DataFrame:
-    if data.empty:
-        return pd.DataFrame(columns=["ID", "日付", "種別", "カテゴリ", "金額", "説明"])
-
-    result = data.sort_values("date", ascending=False).copy()
-    result["ID"] = result["id"]
-    result["日付"] = result["date"]
-    result["種別"] = result["type"].map(type_label)
-    result["カテゴリ"] = result["category"]
-    result["金額"] = result["amount"]
-    result["説明"] = result["description"]
-    return result[["ID", "日付", "種別", "カテゴリ", "金額", "説明"]]
-
-
-def categories_display_frame(data: pd.DataFrame) -> pd.DataFrame:
-    result = data.copy()
-    result["ID"] = result["id"]
-    result["カテゴリ名"] = result["name"]
-    result["種別"] = result["type"].map(type_label)
-    return result[["ID", "カテゴリ名", "種別"]]
+    if rows:
+        result = pd.concat([result, pd.DataFrame(rows)], ignore_index=True)
+    return normalize_transactions(result)
 
 
-def recurring_display_frame(df, category_list):
-
-    if df.empty:
-        return df
-
-    result = df.copy()
-
-    # 日付
-    result["開始月"] = pd.to_datetime(result["start_month"], errors="coerce")
-    result["終了月"] = pd.to_datetime(result["end_month"], errors="coerce")
-
-    # 👇 ここでカテゴリ変換（これが正解の場所）
-    result["カテゴリ"] = result["category"].apply(
-        lambda x: x if x in category_list else "未分類"
-    )
-
-    # その他
-    result = result.rename(columns={
-        "id": "ID",
-        "type": "種別",
-        "amount": "金額",
-        "description": "説明"
-    })
-
-    result["種別"] = result["種別"].map({
-        "income": "収入",
-        "expense": "支出"
-    })
-
-    return result[["ID", "種別", "カテゴリ", "金額", "開始月", "終了月", "説明"]]
-
-def category_summary(
-    month_df: pd.DataFrame,
-    budgets_df: pd.DataFrame,
-    categories: list[str],
-    start: pd.Timestamp,
-    tx_type: str,
-) -> pd.DataFrame:
-    actual = month_df[month_df["type"] == tx_type].groupby("category")["amount"].sum().rename("実際")
-
-    planned = pd.Series(dtype=float, name="予定")
-    if not budgets_df.empty:
-        planned = budgets_df.set_index("category")["amount"].rename("予定")
-
-    index = pd.Index(categories, name="カテゴリ")
-    summary = pd.concat([planned, actual], axis=1).reindex(index).fillna(0)
-
-    summary["差額"] = summary["予定"] - summary["実際"]
-    if tx_type == "income":
-        summary["差額"] = summary["実際"] - summary["予定"]
-
-    return summary
-
-
-def latest_snapshot_before(snapshots_df: pd.DataFrame, as_of: pd.Timestamp):
+def month_balances(transactions_df: pd.DataFrame, snapshots_df: pd.DataFrame, selected_month: date) -> tuple[int, int]:
+    """対象月の月初残高と月末残高を計算します。"""
     if snapshots_df.empty:
-        return None
-    snapshot_ends = snapshots_df["snapshot_month"] + pd.offsets.MonthEnd(0)
-    candidates = snapshots_df[snapshot_ends <= as_of]
-    if candidates.empty:
-        return None
-    return candidates.iloc[-1]
-
-
-def balance_at(transactions_df: pd.DataFrame, snapshots_df: pd.DataFrame, as_of: pd.Timestamp) -> int:
-    if snapshots_df.empty:
-        return 0
-
-    # 最新の基準を取得
-    latest = snapshots_df.sort_values("snapshot_month").iloc[-1]
-    base_month = pd.Timestamp(latest["snapshot_month"])
-    base_balance = int(latest["balance"])
-
-    # 👉 基準より前は0
-    if as_of < base_month:
-        return 0
-
-    # 基準以降のみ加算
-    after = transactions_df[
-        (transactions_df["date"] > (base_month + pd.offsets.MonthEnd(0)))
-        & (transactions_df["date"] <= as_of)
-    ]["signed_amount"].sum()
-
-    return base_balance + int(after)
-
-def month_balances(transactions_df, snapshots_df, selected_month):
-
-    import pandas as pd
-
-    # 日付整形
-    df = transactions_df.copy()
-    df["date"] = pd.to_datetime(df["date"]).dt.normalize()
-
-    # 対象月
-    current = pd.to_datetime(selected_month).to_period("M")
-    prev = current - 1
-
-    # =========================
-    # 基準残高
-    # =========================
-    if snapshots_df is None or snapshots_df.empty:
         base_balance = 0
+        base_cutoff = pd.Timestamp("1900-01-01")
     else:
-        ss = snapshots_df.copy()
-        ss["snapshot_month"] = pd.to_datetime(ss["snapshot_month"])
-        base_balance = int(ss.sort_values("snapshot_month").iloc[0]["balance"])
+        latest = snapshots_df.sort_values("snapshot_month").iloc[-1]
+        base_balance = int(latest["balance"])
+        base_month = pd.Timestamp(latest["snapshot_month"]).to_period("M").to_timestamp()
+        base_cutoff = base_month + pd.offsets.MonthEnd(0)
 
-    # =========================
-    # 前月までの累積
-    # =========================
-    prev_end_date = prev.to_timestamp() + pd.offsets.MonthEnd(1)
-
-    past_df = df[df["date"] <= prev_end_date]
-
-    income = past_df.loc[past_df["type"] == "income", "amount"].sum()
-    expense = past_df.loc[past_df["type"] == "expense", "amount"].sum()
-
-    opening = int(base_balance + income - expense)
-
-    # =========================
-    # 当月
-    # =========================
+    tx = transactions_df.copy()
+    current = pd.Timestamp(selected_month).to_period("M")
     start = current.to_timestamp()
-    end = start + pd.offsets.MonthEnd(1)
+    end = start + pd.offsets.MonthEnd(0)
 
-    month_df = df[(df["date"] >= start) & (df["date"] <= end)]
+    before = tx[(tx["date"] > base_cutoff) & (tx["date"] < start)]["signed_amount"].sum()
+    during = tx[(tx["date"] >= start) & (tx["date"] <= end)]["signed_amount"].sum()
+    opening = int(base_balance + before)
+    return opening, int(opening + during)
 
-    income = month_df.loc[month_df["type"] == "income", "amount"].sum()
-    expense = month_df.loc[month_df["type"] == "expense", "amount"].sum()
 
-    ending = int(opening + income - expense)
+def monthly_asset_rows(transactions_df: pd.DataFrame, snapshots_df: pd.DataFrame, selected_month: date) -> pd.DataFrame:
+    """資産推移画面に使う直近12ヶ月の月次集計を作成します。"""
+    selected = pd.Timestamp(selected_month).to_period("M")
+    months = [selected - 11 + i for i in range(12)]
+    rows: list[dict[str, Any]] = []
 
-    return opening, ending
+    for period in months:
+        start = period.to_timestamp()
+        end = start + pd.offsets.MonthEnd(0)
+        opening, ending = month_balances(transactions_df, snapshots_df, start.date())
+        month_df = transactions_df[(transactions_df["date"] >= start) & (transactions_df["date"] <= end)]
+        income = int(month_df.loc[month_df["type"] == "income", "amount"].sum())
+        expense = int(month_df.loc[month_df["type"] == "expense", "amount"].sum())
+        rows.append(
+            {
+                "month": start,
+                "month_label": format_month(start),
+                "opening": opening,
+                "income": income,
+                "expense": expense,
+                "expense_negative": -expense,
+                "net": income - expense,
+                "balance": ending,
+            }
+        )
+    return pd.DataFrame(rows)
 
-def monthly_asset_series(transactions_df: pd.DataFrame, snapshots_df: pd.DataFrame) -> pd.DataFrame:
-    if snapshots_df.empty:
-        return pd.DataFrame()
 
-    latest = snapshots_df.sort_values("snapshot_month").iloc[-1]
-    base_month = pd.Timestamp(latest["snapshot_month"])
-    base_balance = int(latest["balance"])
+def render_hero(selected_month: date) -> None:
+    """ページ上部のタイトルエリアを表示します。"""
+    st.markdown(
+        f"""
+        <div class="app-hero">
+            <div>
+                <h1>資産管理アプリ</h1>
+                <p>毎月の収支、予算、定期収支、残高推移をひとつの画面感で管理します。</p>
+            </div>
+            <div class="hero-month">{month_label(selected_month)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    # 👉 基準以降のみ対象
-    tx = transactions_df[transactions_df["date"] > (base_month + pd.offsets.MonthEnd(0))]
 
-    # 基準前は0にするため、開始月固定
-    if tx.empty:
-        return pd.DataFrame({"月末残高": [base_balance]}, index=[base_month])
+def metric_card(label: str, value: str, sub: str = "") -> None:
+    """カード型のKPIを表示します。"""
+    st.markdown(
+        f"""
+        <div class="metric-card">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value">{value}</div>
+            <div class="metric-sub">{sub}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    monthly = tx.set_index("date")["signed_amount"].resample("ME").sum().cumsum()
-    monthly = monthly + base_balance
 
-    monthly.index = monthly.index.to_period("M").to_timestamp()
+def category_summary(month_df: pd.DataFrame, budgets_df: pd.DataFrame, categories: list[str], tx_type: str) -> pd.DataFrame:
+    """カテゴリ別の予定・実績・差額テーブルを作成します。"""
+    actual = month_df[month_df["type"] == tx_type].groupby("category")["amount"].sum().rename("実際")
+    planned = budgets_df.set_index("category")["amount"].rename("予定") if not budgets_df.empty else pd.Series(dtype=float)
+    summary = pd.concat([planned, actual], axis=1).reindex(pd.Index(categories, name="カテゴリ")).fillna(0)
+    summary["差額"] = summary["実際"] - summary["予定"] if tx_type == "income" else summary["予定"] - summary["実際"]
+    return summary.astype(int)
 
-    # 基準月だけ追加
-    base_row = pd.Series([base_balance], index=[base_month], name="月末残高")
 
-    return pd.concat([base_row, monthly.rename("月末残高")]).to_frame()
-
-def render_transaction_block(month_df, tx_type, title, categories, selected_month,ttype="expense"  ):
-
-    base_key = f"{tx_type}_{title}"
-
-    tx_date = pd.to_datetime(selected_month).replace(day=1)
-
-    st.markdown(f"### {title}")
-
-    total = month_df.loc[month_df["type"] == tx_type, "amount"].sum()
-    st.write(f"合計: ¥{int(total):,}")
-
-    # =========================
-    # 入力フォーム
-    # =========================
-    with st.form(f"{base_key}_{selected_month}_{ttype}_form", clear_on_submit=True):
-
-        cols = st.columns([1, 2, 1.5])
-
-        amount = cols[0].number_input("金額", min_value=1, step=100, value=1000)
-        description = cols[1].text_input("説明")
-        category = cols[2].selectbox("カテゴリ", categories)
-
-        submitted = st.form_submit_button(f"{title}を追加")
-
-        if submitted:
-
-            try:
-                insert_transaction(
-                    tx_date,
-                    tx_type,
-                    category,
-                    int(amount),
-                    description or ""
+def render_category_charts(month_df: pd.DataFrame) -> None:
+    """支出・収入をカテゴリ別の横棒グラフで表示します。"""
+    cols = st.columns(2)
+    for col, tx_type, title, color in [
+        (cols[0], "expense", "支出カテゴリ", "#ff8a5b"),
+        (cols[1], "income", "収入カテゴリ", "#4dabf7"),
+    ]:
+        with col:
+            st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
+            data = month_df[month_df["type"] == tx_type].groupby("category", as_index=False)["amount"].sum()
+            if data.empty:
+                st.info(f"{title}のデータがありません。")
+                continue
+            chart = (
+                alt.Chart(data)
+                .mark_bar(color=color, cornerRadiusEnd=4)
+                .encode(
+                    x=alt.X("amount:Q", title="金額"),
+                    y=alt.Y("category:N", sort="-x", title="カテゴリ"),
+                    tooltip=[alt.Tooltip("category:N", title="カテゴリ"), alt.Tooltip("amount:Q", title="金額", format=",")],
                 )
-
-                st.success("追加しました")
-                st.rerun()
-
-            except Exception as e:
-                st.error(e)
-
-    st.markdown("---")
+            )
+            st.altair_chart(chart, use_container_width=True)
 
 
-def insert_transaction(tx_date, tx_type, category, amount, description):
-
-    try:
-        res = supabase.table("transactions").insert({
-            "date": tx_date.isoformat(),
-            "type": tx_type,
-            "category": category,
-            "amount": int(amount),
-            "description": description
-        }).execute()
-
-        # 👇 Supabaseエラー拾う（重要）
-        if hasattr(res, "error") and res.error:
-            raise Exception(res.error)
-
-        return True
-
-    except Exception as e:
-        raise Exception(f"INSERT失敗: {e}")
-
-def render_category_delete_editor(cat_df: pd.DataFrame):
-    editor_df = categories_display_frame(cat_df)
-    editor_df.insert(0, "削除", False)
-    edited = st.data_editor(
-        editor_df,
-        key="category_delete_editor",
-        use_container_width=True,
-        hide_index=True,
-        disabled=["ID", "カテゴリ名", "種別"],
-        column_config={
-            "削除": st.column_config.CheckboxColumn("削除"),
-            "ID": None,
-        },
-    )
-    delete_ids = edited.loc[edited["削除"], "ID"].astype(int).tolist()
-    st.caption("削除しても過去の取引に保存済みのカテゴリ文字列は残ります。")
-    if st.button(f"チェックしたカテゴリを削除（{len(delete_ids)}件）", type="secondary", disabled=not delete_ids):
-        for category_id in delete_ids:
-            delete_category(category_id)
-        st.success(f"{len(delete_ids)}件のカテゴリを削除しました。")
-        st.rerun()
-
-
-def render_recurring_delete_editor(recurring_df, key_suffix):
-
-    editor_df = recurring_display_frame(recurring_df, category_list)
-    
-    if editor_df.empty:
-        st.info("データがありません")
-        return
-
-    editor_df["削除"] = False
-
-    editor_df["開始月"] = pd.to_datetime(editor_df["開始月"], errors="coerce")
-    editor_df["終了月"] = pd.to_datetime(editor_df["終了月"], errors="coerce")
-
-    edited = st.data_editor(
-        editor_df,
-        key=f"recurring_editor_{key_suffix}",
-        use_container_width=True,
-        column_config={
-            "削除": st.column_config.CheckboxColumn("削除"),
-            "開始月": st.column_config.DateColumn("開始月", format="YYYY-MM"),
-            "終了月": st.column_config.DateColumn("終了月", format="YYYY-MM"),
-            "金額": st.column_config.NumberColumn("金額", format="¥%d"),
-        },
-        disabled=["ID", "種別", "カテゴリ", "金額", "開始月"]
-    )
-
-    delete_mode = st.radio(
-        "削除方法",
-        ["全て削除", "今月以降を停止"],
-        horizontal=True,
-        key=f"delete_mode_{key_suffix}"
-    )
-
-    col1, col2 = st.columns(2)
-
-    # 更新
-    with col1:
-        if st.button("変更を保存", key=f"save_{key_suffix}"):
-
-            if not edited.equals(editor_df):
-
-                count = 0
-                for _, row in edited.iterrows():
-
-                    end_month = None if pd.isna(row["終了月"]) else row["終了月"]
-
-                    update_recurring(int(row["ID"]), end_month)
-                    count += 1
-
-                st.success(f"{count}件更新しました")
-                st.rerun()
-            else:
-                st.info("変更はありません")
-
-    # 削除
-    with col2:
-        delete_rows = edited[edited["削除"] == True]
-
-        if st.button(f"削除（{len(delete_rows)}件）", key=f"delete_{key_suffix}"):
-
-            if len(delete_rows) == 0:
-                st.warning("削除対象を選択してください")
-                return
-
-            for _, row in delete_rows.iterrows():
-
-                mode = "all" if delete_mode == "全て削除" else "future"
-                delete_recurring(int(row["ID"]), mode)
-
-            st.success(f"{len(delete_rows)}件削除しました")
-            st.rerun()
-
-
-def update_recurring(recurring_id, end_month):
-
-    if pd.notna(end_month):
-        end_month_str = pd.to_datetime(end_month).strftime("%Y-%m-%d")
-    else:
-        end_month_str = None
-
-    supabase.table("recurring_transactions") \
-        .update({"end_month": end_month_str}) \
-        .eq("id", int(recurring_id)) \
-        .execute()
-    
-def render_budget_table(title: str, summary: pd.DataFrame):
-    st.markdown(f'<div class="sheet-title">{title}</div>', unsafe_allow_html=True)
+def render_budget_table(title: str, summary: pd.DataFrame) -> None:
+    """予定・実績・差額のカテゴリ別テーブルを表示します。"""
+    st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
     total = pd.DataFrame(
         {"予定": [summary["予定"].sum()], "実際": [summary["実際"].sum()], "差額": [summary["差額"].sum()]},
         index=["合計"],
@@ -957,1057 +634,425 @@ def render_budget_table(title: str, summary: pd.DataFrame):
         },
     )
 
-def render_asset_combo_chart(transactions_df, snapshots_df, selected_month):
-        # =========================
-    # 日付整形
-    # =========================
-    df = transactions_df.copy()
-    df["date"] = pd.to_datetime(df["date"]).dt.normalize()
 
-    # =========================
-    # 月リスト（直近12ヶ月）
-    # =========================
-    sel = pd.to_datetime(selected_month).to_period("M")
-    start_month = sel - 11
-    months = [start_month + i for i in range(12)]
+def render_transaction_form(tx_type: str, categories: list[str], selected_month: date) -> None:
+    """支出または収入の追加フォームを表示します。"""
+    title = type_label(tx_type)
+    with st.form(f"add_{tx_type}_form", clear_on_submit=True):
+        cols = st.columns([1, 1.2, 2, 1.7])
+        tx_date = cols[0].date_input("日付", value=selected_month, key=f"{tx_type}_date")
+        amount = cols[1].number_input("金額", min_value=1, step=100, value=1000, key=f"{tx_type}_amount")
+        category = cols[2].selectbox("カテゴリ", categories, key=f"{tx_type}_category")
+        description = cols[3].text_input("説明", key=f"{tx_type}_description")
+        if st.form_submit_button(f"{title}を追加", type="primary"):
+            save_transaction(tx_date, tx_type, category, int(amount), description)
+            st.success(f"{title}を追加しました。")
+            st.rerun()
 
-    # =========================
-    # 未来制御（翌月まで）
-    # =========================
-    today = pd.Timestamp.today().to_period("M")
-    limit_month = today + 1
 
-    # =========================
-    # 定期収支
-    # =========================
-    recurring_df = load_table_or_empty("recurring_transactions")
-    recurring_df = recurring_df[
-        (recurring_df["is_deleted"].isna()) | (recurring_df["is_deleted"] == False)
-    ]
-
-    # =========================
-    # 基準残高（固定）
-    # =========================
-    if snapshots_df is None or snapshots_df.empty:
-        base_balance = 0
-    else:
-        ss = snapshots_df.copy()
-        ss["snapshot_month"] = pd.to_datetime(ss["snapshot_month"])
-        base_balance = int(ss.sort_values("snapshot_month").iloc[0]["balance"])
-
-    # =========================
-    # 月ごと計算（ここが最重要）
-    # =========================
-    rows = []
-
-    # 🔥 ここは必ずループ外
-    current_balance = base_balance
-
-    for m in months:
-
-        m_period = pd.to_datetime(str(m)).to_period("M")
-
-        start = m_period.to_timestamp()
-        end = start + pd.offsets.MonthEnd(1)
-
-        calc_df = df[
-            (df["date"] >= start) &
-            (df["date"] <= end)
-        ].copy()
-
-        # 👇 月初（前月の月末）
-        opening = current_balance
-
-        if m_period > limit_month:
-            income = 0
-            expense = 0
-        else:
-            month_df = apply_recurring(calc_df.copy(), recurring_df, start)
-
-            income = month_df.loc[month_df["type"] == "income", "amount"].sum()
-            expense = month_df.loc[month_df["type"] == "expense", "amount"].sum()
-
-        net = int(income - expense)
-
-        # 👇 月末
-        ending = opening + net
-
-        # 👇 次月へ引き継ぎ（ここ超重要）
-        current_balance = ending
-
-        rows.append({
-            "month": start,
-            "opening": opening,
-            "income": income,
-            "expense": -expense,
-            "net": net,
-            "balance": ending
-        })
-
-    monthly = pd.DataFrame(rows)
-
-    # =========================
-    # 表示整形
-    # =========================
-    monthly["month_str"] = monthly["month"].dt.strftime("%Y年%-m月")
-
-    # =========================
-    # KPI
-    # =========================
-    current = int(monthly.iloc[-1]["balance"])
-    prev = int(monthly.iloc[-2]["balance"]) if len(monthly) > 1 else 0
-    diff = current - prev
-    avg = int(monthly["net"].mean()) if not monthly.empty else 0
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("現在資産", f"¥{current:,}")
-    c2.metric("前月比", f"¥{diff:,}", delta=f"{diff:,}")
-    c3.metric("平均増減", f"¥{avg:,}")
-
-    st.markdown("---")
-
-    # =========================
-    # グラフ
-    # =========================
-    base = alt.Chart(monthly).encode(
-        x=alt.X("month_str:N", sort=monthly["month_str"].tolist())
-    )
-
-    income_bar = base.mark_bar(color="#4dabf7").encode(y="income:Q")
-    expense_bar = base.mark_bar(color="#ffa94d").encode(y="expense:Q")
-    line = base.mark_line(point=True, strokeWidth=3, color="#6366f1").encode(y="balance:Q")
-
-    st.altair_chart(income_bar + expense_bar + line, width="stretch")
-
-    # =========================
-    # テーブル
-    # =========================
-    display_df = monthly.copy()
-
-    display_df = display_df.rename(columns={
-        "month_str": "年月",
-        "opening": "月初残高",
-        "income": "収入",
-        "expense": "支出",
-        "net": "増減",
-        "balance": "月末残高"
-    })
-
-    for col in ["月初残高", "収入", "支出", "増減", "月末残高"]:
-        display_df[col] = display_df[col].map(lambda x: f"¥{int(x):,}")
-
-    display_df = display_df.iloc[::-1]
-
-    st.dataframe(display_df, width="stretch", hide_index=True)
-
-def render_asset_trend_12m(transactions_df, snapshots_df, selected_month):
-    """
-    selected_month: datetime/date (その月を含めて過去12ヶ月を表示)
-    """
-
-    # -------------------------
-    # 期間（過去12ヶ月）
-    # -------------------------
-    sel = pd.to_datetime(selected_month)
-    end_month = sel.to_period("M").to_timestamp()               # 月初
-    start_month = (sel.to_period("M") - 11).to_timestamp()      # 11ヶ月前の月初
-
-    months = pd.date_range(start=start_month, end=end_month, freq="MS")  # 月初の連続
-
-    # -------------------------
-    # 取引データ整形
-    # -------------------------
-    if transactions_df.empty:
-        df = pd.DataFrame(columns=["date", "signed_amount"])
-    else:
-        df = transactions_df.copy()
-        df["date"] = pd.to_datetime(df["date"])
-        df["signed_amount"] = df.apply(
-            lambda x: x["amount"] if x["type"] == "income" else -x["amount"],
-            axis=1
-        )
-        # 月初に正規化
-        df["month"] = df["date"].dt.to_period("M").dt.to_timestamp()
-
-    # -------------------------
-    # 基準残高（snapshot）
-    # 「各月の月初時点の残高」を決める
-    # -------------------------
-    if snapshots_df is not None and not snapshots_df.empty:
-        ss = snapshots_df.copy()
-        ss["snapshot_month"] = pd.to_datetime(ss["snapshot_month"])
-        # 月初に揃える
-        ss["month"] = ss["snapshot_month"].dt.to_period("M").dt.to_timestamp()
-        ss = ss.sort_values("month")
-    else:
-        ss = pd.DataFrame(columns=["month", "balance"])
-
-    # ヘルパー：ある月の月初残高（直近のスナップショットを使う）
-    def base_balance_for_month(m):
-        if ss.empty:
-            return 0
-        past = ss[ss["month"] <= m]
-        if past.empty:
-            return 0
-        return int(past.iloc[-1]["balance"])
-
-    # -------------------------
-    # 月次残高を計算
-    # 各月：
-    #   月初残高（スナップショット） + その月の収支合計
-    # -------------------------
-    rows = []
-    for m in months:
-        # 月内の収支
-        if not df.empty:
-            month_sum = df.loc[df["month"] == m, "signed_amount"].sum()
-        else:
-            month_sum = 0
-
-        # 月初残高
-        base = base_balance_for_month(m)
-
-        # 月末残高
-        balance = int(base + month_sum)
-
-        rows.append({
-            "month": m,
-            "balance": balance
-        })
-
-    monthly_df = pd.DataFrame(rows)
-
-    # -------------------------
-    # 日本語表記
-    # -------------------------
-    # Mac/Linux
-    monthly_df["month_str"] = monthly_df["month"].dt.strftime("%Y年%-m月")
-    # Windowsなら↑がダメな場合↓に変更
-    # monthly_df["month_str"] = monthly_df["month"].dt.strftime("%Y年%m月")
-
-    # -------------------------
-    # グラフ
-    # -------------------------
-    st.markdown('<div class="section-title">資産推移（過去12ヶ月）</div>', unsafe_allow_html=True)
-
-    chart = alt.Chart(monthly_df).mark_line(point=True).encode(
-        x=alt.X("month_str:N", title="月"),
-        y=alt.Y("balance:Q", title="残高"),
-        tooltip=[
-            alt.Tooltip("month_str:N", title="月"),
-            alt.Tooltip("balance:Q", title="残高", format=",")
-        ]
-    )
-
-    st.altair_chart(chart, use_container_width=True)
-
-    # -------------------------
-    # テーブル（0補完済み）
-    # -------------------------
-    display_df = monthly_df.rename(columns={
-        "month_str": "月",
-        "balance": "月末残高"
-    })[["月", "月末残高"]]
-
-    display_df["月末残高"] = display_df["月末残高"].map(lambda x: f"¥{x:,}")
-
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-def render_budget_progress(month_df, budgets_df, cat_df):
-    import streamlit as st
-    import pandas as pd
-
-    # =========================
-    # 有効カテゴリ取得
-    # =========================
-    valid_categories = cat_df["name"].tolist()
-
-    # 👇 ここ追加（最重要）
-    budgets_df = budgets_df[budgets_df["category"].isin(valid_categories)]
-
-    # =========================
-    # 支出のみ集計
-    # =========================
-    expense_df = month_df[month_df["type"] == "expense"]
-
-    actual = expense_df.groupby("category")["amount"].sum()
-    budget = budgets_df.set_index("category")["amount"]
-
-    df = pd.DataFrame({
-        "actual": actual,
-        "budget": budget
-    }).fillna(0).reset_index()
-
-    # 予算0は除外
-    df = df[df["budget"] > 0]
-
-    if df.empty:
-        st.info("予算が設定されているカテゴリがありません")
+def render_transaction_editor(month_df: pd.DataFrame, categories: list[str], tx_type: str) -> None:
+    """取引一覧を編集・削除できるテーブルとして表示します。"""
+    data = month_df[(month_df["type"] == tx_type) & (month_df.get("source", "manual") != "recurring")].copy()
+    if data.empty:
+        st.info("手入力のデータがありません。")
         return
 
-    # =========================
-    # UI表示
-    # =========================
-    st.markdown("## 予算進捗")
+    editor = data[["id", "date", "amount", "category", "description"]].copy()
+    editor["削除"] = False
+    edited = st.data_editor(
+        editor,
+        key=f"{tx_type}_editor",
+        use_container_width=True,
+        hide_index=True,
+        disabled=["date"],
+        column_config={
+            "id": None,
+            "date": st.column_config.DateColumn("日付", format="YYYY-MM-DD"),
+            "amount": st.column_config.NumberColumn("金額", step=1, format="¥%d"),
+            "category": st.column_config.SelectboxColumn("カテゴリ", options=categories),
+            "description": st.column_config.TextColumn("説明"),
+            "削除": st.column_config.CheckboxColumn("削除"),
+        },
+    )
 
-    for _, row in df.iterrows():
-        category = row["category"]
-        actual_val = row["actual"]
-        budget_val = row["budget"]
+    if st.button("変更を保存", key=f"{tx_type}_save"):
+        delete_rows = edited[edited["削除"]]
+        for _, row in delete_rows.iterrows():
+            delete_transaction(int(row["id"]))
 
-        progress = min(actual_val / budget_val, 1.0)
-        remaining = budget_val - actual_val
-
-        st.markdown(f"### {category}")
-        st.markdown(f"¥{int(actual_val):,} / ¥{int(budget_val):,}")
-        st.progress(progress)
-
-        if remaining >= 0:
-            st.markdown(f"<span style='color:green'>残り ¥{int(remaining):,}</span>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<span style='color:red'>超過 ¥{int(abs(remaining)):,}</span>", unsafe_allow_html=True)
-
-        st.markdown("---")
-
-
-
-def check_table_exists(supabase, table_name: str) -> bool:
-    """
-    テーブルが存在するかをSupabaseに問い合わせて確認
-    """
-    try:
-        supabase.table(table_name).select("*").limit(1).execute()
-        return True
-    except Exception as e:
-        print(f"[Table Check Error] {table_name}:", e)
-        return False
-    
-def safe_category_display(category, category_list):
-    if category in category_list:
-        return category
-    else:
-        return "未分類"
-
-# =========================
-# 全期間データ取得
-# =========================
-all_transactions_df = load_table("transactions")
-all_transactions_df["date"] = pd.to_datetime(all_transactions_df["date"]).dt.normalize()
-
-recurring_df = load_table_or_empty("recurring_transactions")
-recurring_df = recurring_df[
-    (recurring_df["is_deleted"].isna()) | (recurring_df["is_deleted"] == False)
-]
-
-# =========================
-# 定期収支を全期間に適用
-# =========================
-def apply_recurring_full(df, recurring_df):
-    result = df.copy()
-
-    for _, r in recurring_df.iterrows():
-        start = pd.to_datetime(r["start_month"])
-        end = pd.to_datetime(r["end_month"]) if pd.notna(r["end_month"]) else pd.Timestamp.today()
-        dates = pd.date_range(start=start, end=end, freq="MS")
-
-        for d in dates:
-            result = pd.concat([
-                result,
-                pd.DataFrame([{
-                    "date": d,
-                    "type": r["type"],
-                    "amount": r["amount"],
-                    "category": r.get("category", None)
-                }])
-            ])
-
-    return result
-full_df = apply_recurring_full(all_transactions_df, recurring_df)
-
-def render_transaction_manager(month_df, category_df, selected_month):
-
-    st.markdown("### 収支管理")
-
-    # カテゴリ分離（DB構造活用）
-    expense_categories = category_df[
-        (category_df["type"] == "expense") &
-        (category_df["is_deleted"] == False)
-    ]["name"].tolist()
-
-    income_categories = category_df[
-        (category_df["type"] == "income") &
-        (category_df["is_deleted"] == False)
-    ]["name"].tolist()
-
-    tab1, tab2 = st.tabs(["支出", "収入"])
-
-    for tab, ttype in [(tab1, "expense"), (tab2, "income")]:
-
-        with tab:
-            df = month_df[month_df["type"] == ttype].copy()
-            display_df = df[["id", "amount", "category", "description"]].copy()
-            display_df["削除"] = False
-            # 👇ここが重要
-            if ttype == "expense":
-                render_transaction_block(
-                    month_df,
-                    "expense",
-                    "支出",
-                    expense_categories,
-                    selected_month
-                )
-            else:
-                render_transaction_block(
-                    month_df,
-                    "income",
-                    "収入",
-                    income_categories,
-                    selected_month
-                )
-
-            df = month_df[month_df["type"] == ttype].copy()
-
-            # 削除チェック列追加
-            df["削除"] = False
-
-            edited_df = st.data_editor(
-                display_df,
-                num_rows="dynamic",
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "id": None,  # 👈これで非表示
-                    "amount": st.column_config.NumberColumn("金額", step=1),
-                    "category": st.column_config.SelectboxColumn("カテゴリ", options=category_list),
-                    "description": st.column_config.TextColumn("説明"),
-                    "削除": st.column_config.CheckboxColumn("削除"),
-                }
+        changed_count = 0
+        keep_rows = edited[~edited["削除"]]
+        original = editor.drop(columns=["削除"])
+        merged = keep_rows.merge(original, on="id", suffixes=("_new", "_old"))
+        for _, row in merged.iterrows():
+            amount_new = int(float(row["amount_new"]))
+            changed = (
+                pd.Timestamp(row["date_new"]).date() != pd.Timestamp(row["date_old"]).date()
+                or amount_new != int(row["amount_old"])
+                or str(row["category_new"]) != str(row["category_old"])
+                or str(row["description_new"] or "") != str(row["description_old"] or "")
             )
+            if changed:
+                update_transaction(int(row["id"]), amount_new, str(row["category_new"]), str(row["description_new"] or ""))
+                changed_count += 1
 
-            if st.button(f"{'支出' if ttype=='expense' else '収入'}を保存", key=f"save_{ttype}"):
+        st.success(f"削除:{len(delete_rows)}件 / 更新:{changed_count}件")
+        st.rerun()
 
-                # =========================
-                # 分離
-                # =========================
-                existing = edited_df[edited_df["id"].notna()].copy()
-                new_rows = edited_df[edited_df["id"].isna()].copy()
-                delete_rows = existing[existing["削除"] == True]
 
-                # =========================
-                # ① 削除
-                # =========================
-                delete_count = 0
-                for _, row in delete_rows.iterrows():
-                    supabase.table("transactions") \
-                        .delete() \
-                        .eq("id", int(row["id"])) \
-                        .execute()
-                    delete_count += 1
+def render_transaction_page(month_df: pd.DataFrame, cat_df: pd.DataFrame, selected_month: date) -> None:
+    """収支入力ページを表示します。"""
+    st.markdown('<div class="section-title">収支入力</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-caption">支出と収入をタブで切り替え、追加・編集・削除できます。</div>', unsafe_allow_html=True)
+    tabs = st.tabs(["💸 支出", "💰 収入"])
+    for tab, tx_type in [(tabs[0], "expense"), (tabs[1], "income")]:
+        with tab:
+            categories = active_categories(cat_df, tx_type)
+            if not categories:
+                st.warning("カテゴリを先に追加してください。")
+                continue
+            render_transaction_form(tx_type, categories, selected_month)
+            st.divider()
+            render_transaction_editor(month_df, categories, tx_type)
 
-                # =========================
-                # ② 更新
-                # =========================
-                existing = existing[existing["削除"] == False]
 
-                merged = existing.merge(
-                    df,
-                    on="id",
-                    suffixes=("_new", "_old")
-                )
+def render_monthly_page(month_df: pd.DataFrame, budgets_df: pd.DataFrame, cat_df: pd.DataFrame, opening: int, ending: int) -> None:
+    """月間収支ページを表示します。"""
+    income = int(month_df.loc[month_df["type"] == "income", "amount"].sum())
+    expense = int(month_df.loc[month_df["type"] == "expense", "amount"].sum())
+    saving = income - expense
+    saving_rate = (saving / opening * 100) if opening else 0
 
-                # 型統一
-                merged["amount_new"] = pd.to_numeric(merged["amount_new"], errors="coerce").fillna(0)
-                merged["amount_old"] = pd.to_numeric(merged["amount_old"], errors="coerce").fillna(0)
+    cols = st.columns(4)
+    with cols[0]:
+        metric_card("収入", yen(income), "この月の入金合計")
+    with cols[1]:
+        metric_card("支出", yen(expense), "この月の出金合計")
+    with cols[2]:
+        metric_card("貯蓄", yen(saving), "収入 - 支出")
+    with cols[3]:
+        metric_card("貯蓄率", f"{saving_rate:.1f}%", "月初残高に対する増減")
 
-                merged["description_new"] = merged["description_new"].fillna("")
-                merged["description_old"] = merged["description_old"].fillna("")
-
-                merged["amount_new_int"] = merged["amount_new"].astype(int)
-                merged["amount_old_int"] = merged["amount_old"].astype(int)
-
-                changed = merged[
-                    (merged["amount_new_int"] != merged["amount_old_int"]) |
-                    (merged["category_new"] != merged["category_old"]) |
-                    (merged["description_new"] != merged["description_old"])
-                ]
-
-                update_count = 0
-                for _, row in changed.iterrows():
-
-                    supabase.table("transactions") \
-                        .update({
-                            "amount": int(row["amount_new_int"]),
-                            "category": str(row["category_new"]),
-                            "description": str(row["description_new"])
-                        }) \
-                        .eq("id", int(row["id"])) \
-                        .execute()
-
-                    update_count += 1
-
-                # =========================
-                # ③ 新規追加
-                # =========================
-                insert_count = 0
-
-                for _, row in new_rows.iterrows():
-
-                    try:
-                        amount = int(float(row["amount"]))
-                    except:
-                        amount = 0
-
-                    if amount == 0:
-                        continue
-
-                    supabase.table("transactions") \
-                        .insert({
-                            "date": pd.to_datetime(selected_month).strftime("%Y-%m-%d"),
-                            "type": ttype,
-                            "amount": amount,
-                            "category": row["category"],
-                            "description": row["description"]
-                        }) \
-                        .execute()
-
-                    insert_count += 1
-
-                # =========================
-                # 結果
-                # =========================
-                st.success(f"削除:{delete_count}件 / 更新:{update_count}件 / 追加:{insert_count}件")
-                st.rerun()
-
-def render_setup_notice(balance_ready: bool, recurring_ready: bool):
-    missing = []
-
-    if not balance_ready:
-        missing.append("balance_snapshots")
-
-    if not recurring_ready:
-        missing.append("recurring_transactions")
-
-    # どちらもOKなら何も出さない
-    if not missing:
-        return
-
-    st.warning(
-        f"追加機能に必要なテーブルが未作成です: {', '.join(missing)}"
-    )
-
-    st.caption(
-        "SupabaseのSQL Editorで supabase_schema.sql を実行すると利用できます。"
-    )
-st.title("資産管理アプリ")
-
-try:
-    supabase = get_supabase_client()
-    cat_df = load_table("categories")
-except Exception as exc:
-    st.error("Supabaseに接続できませんでした。secrets.toml の SUPABASE_URL / SUPABASE_KEY を確認してください。")
-    st.exception(exc)
-    st.stop()
-
-if cat_df.empty:
-    st.error("categoriesテーブルにデータがありません。先にカテゴリを登録してください。")
-    st.stop()
-
-required_category_columns = {"id", "name", "type"}
-if not required_category_columns.issubset(cat_df.columns):
-    st.error("categoriesテーブルには id, name, type カラムが必要です。")
-    st.stop()
-
-transactions_df = load_table_or_empty("transactions")
-
-# 👇 これ追加
-if transactions_df.empty:
-    transactions_df = pd.DataFrame(columns=[
-        "id", "date", "type", "amount", "category", "description"
-    ])
-transactions_df["date"] = pd.to_datetime(transactions_df["date"])
-transactions_df["signed_amount"] = transactions_df.apply(
-    lambda row: row["amount"] if row["type"] == "income" else -row["amount"],
-    axis=1
-)
-budgets_df = load_table_or_empty("budgets")
-
-snapshots_raw, balance_ready = load_optional_table("balance_snapshots")
-recurring_raw, recurring_ready = load_optional_table("recurring_transactions")
-snapshots_df = normalize_snapshots(snapshots_raw)
-recurring_df = normalize_recurring(recurring_raw)
-
-cat_df = cat_df.sort_values("id")
-income_categories = cat_df[cat_df["type"] == "income"]["name"].tolist()
-expense_categories = cat_df[cat_df["type"] == "expense"]["name"].tolist()
-
-with st.sidebar:
-    st.markdown("## 資産管理")
-    page = st.radio(
-        "メニュー",
-        ["収支入力", "月間収支", "資産推移", "設定"],
-        label_visibility="collapsed",
-    )
     st.divider()
-    selected_month = month_selector("対象月", "main_month")
-    # =========================
-    # 前処理（必須）
-    # =========================
-    transactions_df["date"] = pd.to_datetime(transactions_df["date"])
-
-    start, end = month_range(selected_month)
-
-    # =========================
-    # 計算用（純データ）
-    # =========================
-    calc_df = transactions_df[
-        (transactions_df["date"] >= start) &
-        (transactions_df["date"] <= end)
-    ].copy()
-
-    # =========================
-    # 表示用（recurring込み）
-    # =========================
-    recurring_df = load_table_or_empty("recurring_transactions")
-    month_df = apply_recurring(calc_df.copy(), recurring_df, selected_month)
-
-
-    # =========================
-    # 収支（計算は純データ）
-    # =========================
-    income = month_df.loc[month_df["type"] == "income", "amount"].sum()
-    expense = month_df.loc[month_df["type"] == "expense", "amount"].sum()
-
-    monthly_saving = income - expense
-
-    # =========================
-    # 残高
-    # =========================
-    month_opening_balance, month_end_balance = month_balances(
-        full_df,  # ←これ
-        snapshots_df,
-        selected_month
-    )
-    # =========================
-    # KPI（単月）
-    # =========================
-    prev_diff = monthly_saving
-    avg_change = monthly_saving
-
-    saving_rate = (monthly_saving / month_opening_balance * 100) if month_opening_balance else 0
-    # =========================
-    # テーブル存在チェック
-    # =========================
-    balance_ready = check_table_exists(supabase, "balance_snapshots")
-    recurring_ready = check_table_exists(supabase, "recurring_transactions")
-
-    # =========================
-    # 通知表示
-    # =========================
-    render_setup_notice(balance_ready, recurring_ready)
-
-    render_setup_notice(balance_ready, recurring_ready)
-
-if page == "収支入力":
-
-    expense_df = month_df[month_df["type"] == "expense"]
-    income_df = month_df[month_df["type"] == "income"]
-
-    st.markdown(f'<div class="sheet-caption">{month_label(selected_month)} の支出と収入を左右に並べて登録します。</div>', unsafe_allow_html=True)
-
-    category_df = load_table_or_empty("categories")
-    category_list = category_df["name"].dropna().tolist()
-    category_df = pd.DataFrame(load_table_or_empty("categories"))
-
-    render_transaction_manager(month_df, category_df, selected_month)
-
-elif page == "月間収支":
-
-    header_left, header_right = st.columns([2.2, 1])
-    with header_left:
-        st.markdown('<div class="sheet-title">月間収支</div>', unsafe_allow_html=True)
-    with header_right:
-        st.metric("月初残高", yen(month_opening_balance))
-        st.metric("月末残高", yen(month_end_balance))
-
-    # 👇 ここに追加！！！
-    c1, c2, c3, c4 = st.columns(4)
-
-    c1.markdown(f"""
-    <div class="kpi-card">
-      <div class="kpi-value">{yen(income)}</div>
-      <div class="kpi-label">収入</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    c2.markdown(f"""
-    <div class="kpi-card">
-      <div class="kpi-value">{yen(expense)}</div>
-      <div class="kpi-label">支出</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    c3.markdown(f"""
-    <div class="kpi-card">
-      <div class="kpi-value">{yen(monthly_saving)}</div>
-      <div class="kpi-label">貯蓄</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    c4.markdown(f"""
-    <div class="kpi-card">
-      <div class="kpi-value">{saving_rate:.1f}%</div>
-      <div class="kpi-label">貯蓄率</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    top_left, top_right = st.columns([1, 1])
-    with top_left:
-        st.bar_chart(pd.DataFrame({"残高": [month_opening_balance, month_end_balance]}, index=["月初残高", "月末残高"]))
-    with top_right:
+    left, right = st.columns([1.15, .85])
+    with left:
+        balance_df = pd.DataFrame({"項目": ["月初残高", "月末残高"], "残高": [opening, ending]})
+        chart = alt.Chart(balance_df).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, color=ACCENT).encode(
+            x=alt.X("項目:N", title=None),
+            y=alt.Y("残高:Q", title="残高"),
+            tooltip=["項目", alt.Tooltip("残高:Q", format=",")],
+        )
+        st.altair_chart(chart, use_container_width=True)
+    with right:
         st.markdown(
             f"""
-            <div class="budget-card">
-                <div class="big">{saving_rate:.0f}%</div>
-                <div class="label">月初残高からの増減率</div>
-                <hr>
-                <div class="big">{yen(monthly_saving)}</div>
-                <div class="label">今月の貯蓄額</div>
+            <div class="panel">
+                <span class="status-pill">月次サマリー</span>
+                <div style="height:.85rem"></div>
+                <div class="metric-label">月初残高</div>
+                <div class="metric-value">{yen(opening)}</div>
+                <div style="height:.7rem"></div>
+                <div class="metric-label">月末残高</div>
+                <div class="metric-value">{yen(ending)}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-    render_budget_progress(month_df, budgets_df, cat_df)
 
-elif page == "資産推移":
-    all_transactions_df = load_table("transactions")
-    
-    render_asset_combo_chart(
-        all_transactions_df,
-        snapshots_df,
-        selected_month
+    st.divider()
+    render_category_charts(month_df)
+    st.divider()
+    render_budget_table("支出 予算進捗", category_summary(month_df, budgets_df, active_categories(cat_df, "expense"), "expense"))
+    render_budget_table("収入 予定進捗", category_summary(month_df, budgets_df, active_categories(cat_df, "income"), "income"))
+
+
+def render_asset_page(transactions_df: pd.DataFrame, snapshots_df: pd.DataFrame, selected_month: date) -> None:
+    """資産推移ページを表示します。"""
+    monthly = monthly_asset_rows(transactions_df, snapshots_df, selected_month)
+    if monthly.empty:
+        st.info("表示できる資産データがありません。")
+        return
+
+    current = int(monthly.iloc[-1]["balance"])
+    prev = int(monthly.iloc[-2]["balance"]) if len(monthly) > 1 else current
+    avg_net = int(monthly["net"].mean())
+    cols = st.columns(3)
+    with cols[0]:
+        metric_card("現在資産", yen(current), "選択月の月末残高")
+    with cols[1]:
+        metric_card("前月比", yen(current - prev), "前月末との差分")
+    with cols[2]:
+        metric_card("平均増減", yen(avg_net), "直近12ヶ月平均")
+
+    st.divider()
+    base = alt.Chart(monthly).encode(x=alt.X("month_label:N", sort=monthly["month_label"].tolist(), title=None))
+    income_bar = base.mark_bar(color="#4dabf7", cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+        y=alt.Y("income:Q", title="収支 / 残高")
+    )
+    expense_bar = base.mark_bar(color="#ffad66", cornerRadiusBottomLeft=3, cornerRadiusBottomRight=3).encode(y="expense_negative:Q")
+    balance_line = base.mark_line(point=True, strokeWidth=3, color=NAVY).encode(y="balance:Q")
+    st.altair_chart(income_bar + expense_bar + balance_line, use_container_width=True)
+
+    display = monthly[["month_label", "opening", "income", "expense", "net", "balance"]].copy().iloc[::-1]
+    display = display.rename(
+        columns={"month_label": "年月", "opening": "月初残高", "income": "収入", "expense": "支出", "net": "増減", "balance": "月末残高"}
+    )
+    st.dataframe(
+        display,
+        use_container_width=True,
+        hide_index=True,
+        column_config={col: st.column_config.NumberColumn(format="¥%d") for col in display.columns if col != "年月"},
     )
 
-elif page == "設定":
-    st.markdown('<div class="sheet-title">設定</div>', unsafe_allow_html=True)
+
+def render_snapshot_settings(snapshots_df: pd.DataFrame) -> None:
+    """基準残高の設定画面を表示します。"""
+    st.subheader("基準残高")
+    if not snapshots_df.empty:
+        latest = snapshots_df.sort_values("snapshot_month").iloc[-1]
+        st.info(f"現在の基準: {latest['snapshot_month'].strftime('%Y-%m')} / {yen(latest['balance'])}")
+
+    with st.form("snapshot_form"):
+        snapshot_month = st.date_input("基準月", value=date.today().replace(day=1))
+        snapshot_balance = st.number_input("残高", min_value=0, step=10000)
+        confirm = st.checkbox("現在の基準残高を置き換える")
+        if st.form_submit_button("更新", type="primary"):
+            if not confirm:
+                st.error("確認チェックを入れてください。")
+            else:
+                save_balance_snapshot(snapshot_month, int(snapshot_balance))
+                st.success("基準残高を更新しました。")
+                st.rerun()
+
+
+def recurring_display_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """定期収支の一覧表示用DataFrameを作成します。"""
+    if df.empty:
+        return pd.DataFrame(columns=["ID", "種別", "日", "カテゴリ", "金額", "開始月", "終了月", "説明", "削除"])
+    result = df.copy()
+    result["ID"] = result["id"]
+    result["種別"] = result["type"].map(type_label)
+    result["日"] = result["day"]
+    result["カテゴリ"] = result["category"]
+    result["金額"] = result["amount"]
+    result["開始月"] = result["start_month"]
+    result["終了月"] = result["end_month"]
+    result["説明"] = result["description"]
+    result["削除"] = False
+    return result[["ID", "種別", "日", "カテゴリ", "金額", "開始月", "終了月", "説明", "削除"]]
+
+
+def render_recurring_settings(recurring_df: pd.DataFrame, cat_df: pd.DataFrame, selected_month: date) -> None:
+    """定期収支の追加・停止・削除画面を表示します。"""
+    st.subheader("定期収入・定期支出")
+    type_label_selected = st.segmented_control("種別", ["支出", "収入"], default="支出", key="recurring_type")
+    recurring_type = type_value(type_label_selected)
+    categories = active_categories(cat_df, recurring_type)
+
+    with st.form("recurring_form", clear_on_submit=True):
+        cols = st.columns([.7, 1.1, 1.4, 1, 1])
+        day = cols[0].number_input("日", min_value=1, max_value=28, value=1, step=1)
+        amount = cols[1].number_input("金額", min_value=0, step=1000)
+        category = cols[2].selectbox("カテゴリ", categories)
+        start_month = cols[3].date_input("開始月", value=selected_month)
+        use_end = cols[4].checkbox("終了月あり")
+        end_month = st.date_input("終了月", value=selected_month, disabled=not use_end)
+        desc = st.text_input("説明")
+        if st.form_submit_button("定期収支を追加", type="primary"):
+            save_recurring(recurring_type, int(day), int(amount), category, desc, pd.Timestamp(start_month), end_month if use_end else None)
+            st.success("定期収支を追加しました。")
+            st.rerun()
+
+    st.divider()
+    tabs = st.tabs(["💸 支出", "💰 収入"])
+    for tab, tx_type in [(tabs[0], "expense"), (tabs[1], "income")]:
+        with tab:
+            df = recurring_df[(recurring_df["type"] == tx_type) & (~recurring_df["is_deleted"])].copy()
+            edited = st.data_editor(
+                recurring_display_frame(df),
+                key=f"recurring_editor_{tx_type}",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "ID": None,
+                    "日": st.column_config.NumberColumn("日", min_value=1, max_value=28, step=1, disabled=True),
+                    "金額": st.column_config.NumberColumn("金額", format="¥%d", disabled=True),
+                    "開始月": st.column_config.DateColumn("開始月", format="YYYY-MM", disabled=True),
+                    "終了月": st.column_config.DateColumn("終了月", format="YYYY-MM"),
+                    "削除": st.column_config.CheckboxColumn("削除"),
+                },
+                disabled=["種別", "カテゴリ", "説明"],
+            )
+            delete_mode = st.radio("削除方法", ["全て削除", "選択月以降を停止"], horizontal=True, key=f"delete_mode_{tx_type}")
+            if st.button("一覧を保存", key=f"recurring_save_{tx_type}"):
+                delete_rows = edited[edited["削除"]]
+                for _, row in delete_rows.iterrows():
+                    delete_recurring(int(row["ID"]), "all" if delete_mode == "全て削除" else "future", selected_month)
+                for _, row in edited[~edited["削除"]].iterrows():
+                    update_recurring(int(row["ID"]), row["終了月"])
+                st.success(f"{len(edited)}件を確認しました。")
+                st.rerun()
+
+
+def categories_display_frame(cat_df: pd.DataFrame) -> pd.DataFrame:
+    """カテゴリ一覧の表示用DataFrameを作成します。"""
+    data = cat_df[~cat_df["is_deleted"]].copy()
+    data["ID"] = data["id"]
+    data["カテゴリ名"] = data["name"]
+    data["種別"] = data["type"].map(type_label)
+    data["削除"] = False
+    return data[["ID", "カテゴリ名", "種別", "削除"]]
+
+
+def render_category_settings(cat_df: pd.DataFrame) -> None:
+    """カテゴリの追加・削除画面を表示します。"""
+    st.subheader("カテゴリ")
+    with st.form("category_form", clear_on_submit=True):
+        cols = st.columns([1, 2])
+        new_type_label = cols[0].segmented_control("種別", ["支出", "収入"], default="支出")
+        new_name = cols[1].text_input("カテゴリ名")
+        if st.form_submit_button("カテゴリを追加", type="primary"):
+            name = new_name.strip()
+            if not name:
+                st.error("カテゴリ名を入力してください。")
+            elif name in active_categories(cat_df):
+                st.error("同じカテゴリ名が既にあります。")
+            else:
+                save_category(name, type_value(new_type_label))
+                st.success("カテゴリを追加しました。")
+                st.rerun()
+
+    edited = st.data_editor(
+        categories_display_frame(cat_df),
+        key="category_editor",
+        use_container_width=True,
+        hide_index=True,
+        disabled=["ID", "カテゴリ名", "種別"],
+        column_config={"ID": None, "削除": st.column_config.CheckboxColumn("削除")},
+    )
+    delete_ids = edited.loc[edited["削除"], "ID"].astype(int).tolist()
+    if st.button(f"チェックしたカテゴリを削除（{len(delete_ids)}件）", disabled=not delete_ids):
+        for category_id in delete_ids:
+            delete_category(category_id)
+        st.success(f"{len(delete_ids)}件のカテゴリを削除しました。")
+        st.rerun()
+
+
+def render_budget_settings(cat_df: pd.DataFrame, budgets_df: pd.DataFrame) -> None:
+    """カテゴリ別予算の編集画面を表示します。"""
+    st.subheader("予算設定（全月共通）")
+    categories = active_categories(cat_df)
+    with st.form("budget_form"):
+        selected_category = st.selectbox("カテゴリ", categories)
+        existing = budgets_df[budgets_df["category"] == selected_category]
+        default_amount = int(existing["amount"].iloc[0]) if not existing.empty else 0
+        amount = st.number_input("予算", value=default_amount, step=1000)
+        if st.form_submit_button("保存", type="primary"):
+            save_budget(selected_category, int(amount))
+            st.success("予算を保存しました。")
+            st.rerun()
+
+    merged = cat_df[~cat_df["is_deleted"]][["name", "type"]].merge(budgets_df, left_on="name", right_on="category", how="left")
+    merged["amount"] = merged["amount"].fillna(0).astype(int)
+    cols = st.columns(2)
+    for col, tx_type, title in [(cols[0], "expense", "支出"), (cols[1], "income", "収入")]:
+        with col:
+            data = merged[merged["type"] == tx_type][["name", "amount"]].rename(columns={"name": "カテゴリ", "amount": "予算"})
+            st.markdown(f"### {title}")
+            st.dataframe(data, use_container_width=True, hide_index=True, column_config={"予算": st.column_config.NumberColumn(format="¥%d")})
+            st.caption(f"合計: {yen(data['予算'].sum())}")
+
+
+def render_settings_page(
+    snapshots_df: pd.DataFrame, recurring_df: pd.DataFrame, cat_df: pd.DataFrame, budgets_df: pd.DataFrame, selected_month: date
+) -> None:
+    """設定ページのサブメニューを表示します。"""
+    st.markdown('<div class="section-title">設定</div>', unsafe_allow_html=True)
     setting_page = st.segmented_control(
-        "設定メニュー",
-        ["基準残高", "定期収支", "カテゴリ", "予算"],
-        default="基準残高",
-        key="settings_menu",
+        "設定メニュー", ["基準残高", "定期収支", "カテゴリ", "予算"], default="基準残高", key="settings_menu"
     )
     if setting_page == "基準残高":
-        # =====================
-        # 基準残高（フォーム化）
-        # =====================
-
-        st.subheader("基準残高")
-
-        # 現在の基準表示
-        if not snapshots_df.empty:
-            latest = snapshots_df.sort_values("snapshot_month").iloc[-1]
-            st.info(
-                f"現在の基準：{latest['snapshot_month'].strftime('%Y-%m')} / ¥{int(latest['balance']):,}"
-            )
-        
-        with st.form("snapshot_form"):
-        
-            snapshot_month = st.date_input("基準月")
-            snapshot_balance = st.number_input("残高", min_value=0, step=10000)
-
-            confirm = st.checkbox("内容を理解して更新する")
-
-            submitted = st.form_submit_button("更新")
-
-            if submitted:
-                if not confirm:
-                    st.error("チェックを入れてください")
-                else:
-                    save_balance_snapshot(snapshot_month, int(snapshot_balance))
-                    st.success("更新しました")
-                    st.rerun()
-
-    # =========================
-    # 定期収支ページ
-    # =========================
+        render_snapshot_settings(snapshots_df)
     elif setting_page == "定期収支":
-
-        st.subheader("定期収入・定期支出")
-
-        # =========================
-        # データ取得
-        # =========================
-        recurring_df = load_table_or_empty("recurring_transactions")
-
-        if "is_deleted" in recurring_df.columns:
-            recurring_df = recurring_df[recurring_df["is_deleted"] != True]
-        expense_df = recurring_df[recurring_df["type"] == "expense"]
-        income_df = recurring_df[recurring_df["type"] == "income"]
-
-        cat_df = load_table_or_empty("categories")
-
-        expense_categories = cat_df[cat_df["type"] == "expense"]["name"].tolist()
-        income_categories = cat_df[cat_df["type"] == "income"]["name"].tolist()
-
-        if cat_df.empty:
-            st.warning("カテゴリを先に登録してください")
-            st.stop()
-
-        # =========================
-        # ① 入力フォーム（カード）
-        # =========================
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-
-        # =========================
-        # 種別（form外）
-        # =========================
-        recurring_type_label = st.segmented_control(
-            "種別",
-            ["支出", "収入"],
-            default="支出",
-            key="recurring_type"
-        )
-
-        recurring_type = "expense" if recurring_type_label == "支出" else "income"
-
-
-        # =========================
-        # 👇 form外
-        # =========================
-        use_end = st.checkbox("終了月を設定")
-
-        # =========================
-        # form（全部中に入れる）
-        # =========================
-        with st.form("recurring_form", clear_on_submit=True):
-        
-            cols = st.columns([1, 1, 1, 1, 1.5])
-
-            # カテゴリ
-            if recurring_type == "expense":
-                category_list = expense_categories
-            else:
-                category_list = income_categories
-
-            # 金額
-            recurring_amount = cols[0].number_input(
-                "金額",
-                min_value=0,
-                step=1000
-            )
-
-            # カテゴリ
-            recurring_category = cols[1].selectbox(
-                "カテゴリ",
-                category_list,
-                key=f"recurring_category_{recurring_type}"
-            )
-
-            # 年月
-            import datetime
-            today = datetime.date.today()
-
-            years = list(range(today.year - 5, today.year + 5))
-            months = list(range(1, 13))
-
-            year = cols[2].selectbox("年", years, index=years.index(today.year))
-            month = cols[3].selectbox("月", months, index=today.month - 1)
-
-            start_month = pd.Timestamp(year=year, month=month, day=1)
-
-            # =========================
-            # 終了月（form内に入れる ←重要）
-            # =========================
-            end_month = None
-
-            if use_end:
-            
-                end_years = [y for y in years if y >= year]
-
-                end_year = cols[2].selectbox("終了年", end_years, key="end_year")
-
-                if end_year == year:
-                    end_months = [m for m in months if m >= month]
-                else:
-                    end_months = months
-
-                end_month_val = cols[3].selectbox("終了月", end_months, key="end_month")
-
-                end_month = pd.Timestamp(
-                    year=end_year,
-                    month=end_month_val,
-                    day=1
-                )
-
-            # 説明
-            recurring_desc = st.text_input("説明")
-
-            # 👇 submitは必ずform内
-            submitted = st.form_submit_button("定期収支を追加")
-
-            if submitted:
-                save_recurring(
-                    recurring_type,
-                    int(recurring_amount),
-                    recurring_category,
-                    recurring_desc or "",
-                    start_month,
-                    end_month
-                )
-
-                st.success("定期収支を追加しました")
-                st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # =========================
-        # ② 一覧（ここに入れる ← 今回のやつ）
-        # =========================
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-
-        st.markdown('<div class="section-title">定期収支一覧</div>', unsafe_allow_html=True)
-
-        tab1, tab2 = st.tabs(["🔴 支出", "🟢 収入"])
-
-        with tab1:
-            st.markdown('<div class="expense-title">支出一覧</div>', unsafe_allow_html=True)
-            render_recurring_delete_editor(expense_df, "expense")
-
-        with tab2:
-            st.markdown('<div class="income-title">収入一覧</div>', unsafe_allow_html=True)
-            render_recurring_delete_editor(income_df, "income")
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
+        render_recurring_settings(recurring_df, cat_df, selected_month)
     elif setting_page == "カテゴリ":
-
-        st.subheader("カテゴリの追加")
-
-        with st.form("category_form", clear_on_submit=True):
-
-            cols = st.columns([1, 2])
-
-            # 👇 keyをユニークに変更（ここ重要）
-            new_type_label = cols[0].segmented_control(
-                "種別",
-                ["支出", "収入"],
-                default="支出",
-                key="category_add_type"   # ←変更
-            )
-
-            new_name = cols[1].text_input(
-                "カテゴリ名",
-                key="category_add_name"   # ←追加（安全のため）
-            )
-
-            submitted = st.form_submit_button("カテゴリを追加", type="primary")
-
-            if submitted:
-
-                if not new_name.strip():
-                    st.error("カテゴリ名を入力してください。")
-
-                elif new_name.strip() in cat_df["name"].tolist():
-                    st.error("同じカテゴリ名が既にあります。")
-
-                else:
-                    # 👇 明示的に変換（安全）
-                    new_type = "expense" if new_type_label == "支出" else "income"
-
-                    save_category(new_name.strip(), new_type)
-
-                    st.success("カテゴリを追加しました。")
-
-                    # 👇 stateリセット（これがバグ防止の核心）
-                    if "category_add_type" in st.session_state:
-                        del st.session_state["category_add_type"]
-
-                    if "category_add_name" in st.session_state:
-                        del st.session_state["category_add_name"]
-
-                    st.rerun()
-
-        st.subheader("カテゴリ一覧・削除")
-        render_category_delete_editor(cat_df)
-        
+        render_category_settings(cat_df)
     elif setting_page == "予算":
+        render_budget_settings(cat_df, budgets_df)
 
-        st.subheader("予算設定（全月共通）")
 
-        categories = cat_df["name"].tolist()
-        
-        with st.form("budget_form"):
+def render_setup_notice(balance_ready: bool, recurring_ready: bool) -> None:
+    """追加テーブルが存在しない場合にサイドバーへ警告を表示します。"""
+    missing = []
+    if not balance_ready:
+        missing.append("balance_snapshots")
+    if not recurring_ready:
+        missing.append("recurring_transactions")
+    if missing:
+        st.warning(f"追加機能に必要なテーブルが未作成です: {', '.join(missing)}")
+        st.caption("SupabaseのSQL Editorで必要なテーブルを作成してください。")
 
-            selected_category = st.selectbox("カテゴリ", categories)
 
-            existing = budgets_df[budgets_df["category"] == selected_category]
+def load_app_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, bool, bool]:
+    """アプリで使う全テーブルを読み込み、画面用に正規化します。"""
+    cat_df = normalize_categories(load_table("categories"))
+    transactions_df = normalize_transactions(load_table("transactions"))
+    budgets_df = normalize_budgets(load_table("budgets"))
+    snapshots_raw, balance_ready = load_optional_table("balance_snapshots")
+    recurring_raw, recurring_ready = load_optional_table("recurring_transactions")
+    return (
+        cat_df,
+        transactions_df,
+        budgets_df,
+        normalize_snapshots(snapshots_raw),
+        normalize_recurring(recurring_raw),
+        balance_ready,
+        recurring_ready,
+    )
 
-            default_amount = 0
-            if not existing.empty:
-                default_amount = int(existing["amount"].iloc[0])
 
-            amount = st.number_input(
-                "予算",
-                value=default_amount,
-                step=1000
-            )
+def main() -> None:
+    """Streamlitアプリのエントリーポイントです。"""
+    inject_styles()
+    require_login()
 
-            submitted = st.form_submit_button("保存")
+    global supabase
+    try:
+        supabase = get_supabase_client()
+        cat_df, transactions_df, budgets_df, snapshots_df, recurring_df, balance_ready, recurring_ready = load_app_data()
+    except Exception as exc:
+        st.error("Supabaseに接続できませんでした。secrets.toml の SUPABASE_URL / SUPABASE_KEY を確認してください。")
+        st.exception(exc)
+        st.stop()
 
-            if submitted:
-                save_budget(selected_category, int(amount))
-                st.success("保存しました")
-                st.rerun()
+    if cat_df.empty:
+        st.error("categoriesテーブルにデータがありません。先にカテゴリを登録してください。")
+        st.stop()
 
-        # =========================
-        # 予算一覧（全カテゴリ表示）
-        # =========================
-
+    with st.sidebar:
+        st.markdown("## 資産管理")
+        page = st.radio("メニュー", ["収支入力", "月間収支", "資産推移", "設定"], label_visibility="collapsed")
         st.divider()
-        st.subheader("現在の予算一覧")
+        selected_month = month_selector("対象月", "main_month")
+        st.divider()
+        render_setup_notice(balance_ready, recurring_ready)
 
-        # カテゴリベースで作る（ここがポイント）
-        all_categories = cat_df[["name", "type"]].copy()
+    start, end = month_range(selected_month)
+    full_transactions_df = expand_recurring_transactions(transactions_df, recurring_df, selected_month)
+    month_manual_df = transactions_df[(transactions_df["date"] >= start) & (transactions_df["date"] <= end)].copy()
+    month_df = apply_recurring(month_manual_df, recurring_df, selected_month)
+    opening, ending = month_balances(full_transactions_df, snapshots_df, selected_month)
 
-        # 予算と結合（LEFT JOIN）
-        merged = all_categories.merge(
-            budgets_df,
-            left_on="name",
-            right_on="category",
-            how="left"
-        )
+    render_hero(selected_month)
+    if page == "収支入力":
+        render_transaction_page(month_df, cat_df, selected_month)
+    elif page == "月間収支":
+        render_monthly_page(month_df, budgets_df, cat_df, opening, ending)
+    elif page == "資産推移":
+        render_asset_page(full_transactions_df, snapshots_df, selected_month)
+    elif page == "設定":
+        render_settings_page(snapshots_df, recurring_df, cat_df, budgets_df, selected_month)
 
-        # 未設定は0円
-        merged["amount"] = merged["amount"].fillna(0).astype(int)
 
-        # 分割
-        expense_df = merged[merged["type"] == "expense"]
-        income_df = merged[merged["type"] == "income"]
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("### 💸 支出")
-            st.dataframe(
-                expense_df[["name", "amount"]],
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "name": "カテゴリ",
-                    "amount": st.column_config.NumberColumn("予算", format="¥%d"),
-                }
-            )
-            st.caption(f"合計: ¥{expense_df['amount'].sum():,}")
-
-        with col2:
-            st.markdown("### 💰 収入")
-            st.dataframe(
-                income_df[["name", "amount"]],
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "name": "カテゴリ",
-                    "amount": st.column_config.NumberColumn("予算", format="¥%d"),
-                }
-            )
-            st.caption(f"合計: ¥{income_df['amount'].sum():,}")
+if __name__ == "__main__":
+    main()
