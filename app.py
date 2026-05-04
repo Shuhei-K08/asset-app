@@ -108,6 +108,31 @@ def inject_styles() -> None:
             font-weight: 800;
             margin: 0 0 .15rem;
         }}
+        .account-chip {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .55rem;
+            min-height: 2.35rem;
+            padding: .35rem .55rem .35rem .7rem;
+            border: 1px solid rgba(219, 225, 234, .95);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, .86);
+            color: {INK};
+            font-size: .78rem;
+            font-weight: 800;
+            overflow: hidden;
+        }}
+        .account-email {{
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }}
+        .account-link {{
+            color: {ACCENT_DARK};
+            white-space: nowrap;
+            font-size: .74rem;
+        }}
         div[data-testid="stSegmentedControl"] {{
             gap: .25rem;
         }}
@@ -1044,7 +1069,7 @@ def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str
         "設定": "設定",
     }
 
-    left, middle, right, account = st.columns([2.4, .95, 1.25, .9])
+    left, middle, right, account = st.columns([2.35, .9, 1.2, 1.25])
     with left:
         st.markdown('<div class="nav-caption">NAVIGATION</div>', unsafe_allow_html=True)
         page_label = st.segmented_control(
@@ -1059,9 +1084,16 @@ def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str
     with right:
         selected_month = month_selector("対象月", "main_month")
     with account:
-        st.caption("ACCOUNT")
-        if st.button("ログアウト", key="logout_button", use_container_width=True):
-            logout()
+        st.markdown('<div class="nav-caption">ACCOUNT</div>', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="account-chip">
+                <span class="account-email">{current_user_email()}</span>
+                <span class="account-link">設定でログアウト</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     render_setup_notice(balance_ready, recurring_ready)
     reverse_labels = {value: key for key, value in labels.items()}
