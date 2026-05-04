@@ -45,7 +45,7 @@ def inject_styles() -> None:
         }}
         .block-container {{
             max-width: 1180px;
-            padding-top: 1.25rem;
+            padding-top: 1rem;
             padding-bottom: 3rem;
         }}
         .app-hero {{
@@ -53,19 +53,20 @@ def inject_styles() -> None:
             align-items: flex-end;
             justify-content: space-between;
             gap: 1rem;
-            padding: 1.25rem 1.35rem;
-            margin-bottom: .85rem;
+            padding: 1.55rem 1.65rem;
+            margin-bottom: .8rem;
             color: white;
             background:
-                linear-gradient(135deg, rgba(23, 32, 51, .92), rgba(48, 71, 94, .86)),
-                linear-gradient(135deg, {ACCENT}, #ffb86b);
-            border: 1px solid rgba(255, 255, 255, .35);
+                linear-gradient(135deg, rgba(15, 23, 42, .96), rgba(48, 71, 94, .80)),
+                radial-gradient(circle at 10% 15%, rgba(244, 91, 34, .50), transparent 24rem),
+                radial-gradient(circle at 88% 30%, rgba(77, 171, 247, .30), transparent 20rem);
+            border: 1px solid rgba(255, 255, 255, .22);
             border-radius: 8px;
-            box-shadow: 0 18px 45px rgba(23, 32, 51, .16);
+            box-shadow: 0 18px 50px rgba(23, 32, 51, .18);
         }}
         .app-hero h1 {{
             margin: 0;
-            font-size: 2rem;
+            font-size: 2.15rem;
             line-height: 1.1;
             color: white;
         }}
@@ -79,43 +80,73 @@ def inject_styles() -> None:
             font-weight: 700;
             white-space: nowrap;
         }}
-        .top-shell {{
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            padding: .75rem;
-            margin-bottom: 1.15rem;
+        .control-strip {{
+            padding: .7rem .8rem .6rem;
+            margin-bottom: 1rem;
             border: 1px solid rgba(219, 225, 234, .92);
             border-radius: 8px;
-            background: rgba(255, 255, 255, .82);
-            box-shadow: 0 14px 38px rgba(23, 32, 51, .10);
+            background: rgba(255, 255, 255, .72);
+            box-shadow: 0 10px 30px rgba(23, 32, 51, .07);
             backdrop-filter: blur(12px);
         }}
-        .top-shell [data-testid="stHorizontalBlock"] {{
+        .control-strip [data-testid="stHorizontalBlock"] {{
             align-items: end;
+        }}
+        div[data-testid="stHorizontalBlock"]:has(.nav-caption) {{
+            align-items: end;
+            padding: .72rem .82rem .65rem;
+            margin: 0 0 1rem;
+            border: 1px solid rgba(219, 225, 234, .92);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, .74);
+            box-shadow: 0 10px 30px rgba(23, 32, 51, .07);
+            backdrop-filter: blur(12px);
         }}
         .nav-caption {{
             color: {MUTED};
-            font-size: .78rem;
+            font-size: .72rem;
             font-weight: 800;
-            margin: 0 0 .25rem;
+            margin: 0 0 .15rem;
         }}
         div[data-testid="stSegmentedControl"] {{
-            gap: .35rem;
+            gap: .25rem;
         }}
         div[data-testid="stSegmentedControl"] button {{
-            min-height: 2.5rem;
+            min-height: 2.35rem;
             border-radius: 8px;
             border: 1px solid rgba(219, 225, 234, .95);
-            background: #fff;
+            background: rgba(255, 255, 255, .86);
             color: {INK};
             font-weight: 800;
         }}
         div[data-testid="stSegmentedControl"] button[aria-pressed="true"] {{
-            border-color: rgba(244, 91, 34, .45);
-            background: linear-gradient(135deg, rgba(244, 91, 34, .16), rgba(77, 171, 247, .10));
-            color: {ACCENT_DARK};
-            box-shadow: inset 0 0 0 1px rgba(244, 91, 34, .10);
+            border-color: rgba(23, 32, 51, .95);
+            background: linear-gradient(135deg, #172033, #30475e);
+            color: white;
+            box-shadow: 0 8px 18px rgba(23, 32, 51, .18);
+        }}
+        div[data-testid="stSegmentedControl"] button[aria-selected="true"],
+        div[data-testid="stSegmentedControl"] button[aria-checked="true"] {{
+            border-color: rgba(23, 32, 51, .95);
+            background: linear-gradient(135deg, #172033, #30475e);
+            color: white;
+            box-shadow: 0 8px 18px rgba(23, 32, 51, .18);
+        }}
+        div[data-testid="stSelectbox"] label,
+        div[data-testid="stNumberInput"] label,
+        div[data-testid="stDateInput"] label,
+        div[data-testid="stTextInput"] label {{
+            color: {MUTED};
+            font-weight: 800;
+            font-size: .82rem;
+        }}
+        div[data-baseweb="select"] > div,
+        div[data-testid="stNumberInput"] input,
+        div[data-testid="stTextInput"] input,
+        div[data-testid="stDateInput"] input {{
+            border-radius: 8px;
+            border-color: rgba(219, 225, 234, .95);
+            background: rgba(255, 255, 255, .9);
         }}
         .section-title {{
             color: {INK};
@@ -133,8 +164,18 @@ def inject_styles() -> None:
             padding: 1rem 1.1rem;
             border: 1px solid rgba(219, 225, 234, .95);
             border-radius: 8px;
-            background: rgba(255, 255, 255, .88);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,.96), rgba(255,255,255,.84));
             box-shadow: 0 12px 30px rgba(23, 32, 51, .08);
+            position: relative;
+            overflow: hidden;
+        }}
+        .metric-card::before {{
+            content: "";
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 4px;
+            background: linear-gradient(180deg, {ACCENT}, #4dabf7);
         }}
         .metric-label {{
             color: {MUTED};
@@ -171,6 +212,31 @@ def inject_styles() -> None:
             color: {ACCENT_DARK};
             font-size: .82rem;
             font-weight: 800;
+        }}
+        .insight-card {{
+            min-height: 132px;
+            padding: 1rem;
+            border: 1px solid rgba(219, 225, 234, .95);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, .88);
+            box-shadow: 0 10px 28px rgba(23, 32, 51, .07);
+        }}
+        .insight-title {{
+            color: {MUTED};
+            font-size: .78rem;
+            font-weight: 850;
+            margin-bottom: .4rem;
+        }}
+        .insight-value {{
+            color: {INK};
+            font-size: 1.2rem;
+            font-weight: 900;
+            line-height: 1.25;
+        }}
+        .insight-note {{
+            color: {MUTED};
+            font-size: .82rem;
+            margin-top: .45rem;
         }}
         .mobile-list {{
             display: none;
@@ -258,7 +324,7 @@ def inject_styles() -> None:
                 font-size: .86rem;
             }}
             .hero-month {{ text-align: left; margin-top: .75rem; }}
-            .top-shell {{
+            .control-strip {{
                 position: static;
                 padding: .65rem;
                 margin-bottom: .85rem;
@@ -394,6 +460,14 @@ def month_selector(label: str, key: str, default: date | None = None) -> date:
     year = cols[0].selectbox("年", years, index=years.index(default.year), key=f"{key}_year")
     month = cols[1].selectbox("月", list(range(1, 13)), index=default.month - 1, key=f"{key}_month")
     return date(int(year), int(month), 1)
+
+
+def selected_month_from_state(key: str, default: date | None = None) -> date:
+    """月セレクタの現在値をsession_stateから取得します。"""
+    default = first_day(default or date.today())
+    year = int(st.session_state.get(f"{key}_year", default.year))
+    month = int(st.session_state.get(f"{key}_month", default.month))
+    return date(year, month, 1)
 
 
 def ensure_columns(df: pd.DataFrame, defaults: dict[str, Any]) -> pd.DataFrame:
@@ -739,6 +813,20 @@ def metric_card(label: str, value: str, sub: str = "") -> None:
     )
 
 
+def insight_card(title: str, value: str, note: str) -> None:
+    """月間状況の短い気づきをカード表示します。"""
+    st.markdown(
+        f"""
+        <div class="insight-card">
+            <div class="insight-title">{title}</div>
+            <div class="insight-value">{value}</div>
+            <div class="insight-note">{note}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str, date]:
     """サイドバーの代わりになる上部ナビゲーションと対象月選択を表示します。"""
     pages = ["収支入力", "月間収支", "資産推移", "設定"]
@@ -749,19 +837,18 @@ def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str
         "設定": "設定",
     }
 
-    with st.container(border=True):
-        left, right = st.columns([2.6, 1.4])
-        with left:
-            st.markdown('<div class="nav-caption">MENU</div>', unsafe_allow_html=True)
-            page_label = st.segmented_control(
-                "メニュー",
-                [labels[page] for page in pages],
-                default=labels[pages[0]],
-                label_visibility="collapsed",
-                key="main_page_nav",
-            )
-        with right:
-            selected_month = month_selector("対象月", "main_month")
+    left, right = st.columns([2.4, 1.25])
+    with left:
+        st.markdown('<div class="nav-caption">NAVIGATION</div>', unsafe_allow_html=True)
+        page_label = st.segmented_control(
+            "メニュー",
+            [labels[page] for page in pages],
+            default=labels[pages[0]],
+            label_visibility="collapsed",
+            key="main_page_nav",
+        )
+    with right:
+        selected_month = month_selector("対象月", "main_month")
 
     render_setup_notice(balance_ready, recurring_ready)
     reverse_labels = {value: key for key, value in labels.items()}
@@ -899,16 +986,54 @@ def render_budget_table(title: str, summary: pd.DataFrame) -> None:
     )
 
 
+def render_monthly_insights(month_df: pd.DataFrame, budgets_df: pd.DataFrame, cat_df: pd.DataFrame, selected_month: date) -> None:
+    """月間収支から自動インサイトを3つ表示します。"""
+    st.markdown('<div class="section-title">今月のインサイト</div>', unsafe_allow_html=True)
+
+    expense_df = month_df[month_df["type"] == "expense"]
+    top_category = "支出なし"
+    top_amount = 0
+    if not expense_df.empty:
+        top = expense_df.groupby("category")["amount"].sum().sort_values(ascending=False)
+        top_category = str(top.index[0])
+        top_amount = int(top.iloc[0])
+
+    expense_total = int(expense_df["amount"].sum())
+    expense_budget = int(
+        budgets_df[budgets_df["category"].isin(active_categories(cat_df, "expense"))]["amount"].sum()
+    ) if not budgets_df.empty else 0
+    budget_gap = expense_budget - expense_total
+    budget_status = "予算内" if budget_gap >= 0 else "予算超過"
+    budget_note = f"支出予算 {yen(expense_budget)} / 実績 {yen(expense_total)}" if expense_budget else "支出予算を設定すると精度が上がります"
+
+    selected_ts = pd.Timestamp(selected_month)
+    month_end = selected_ts + pd.offsets.MonthEnd(0)
+    today = pd.Timestamp.today().normalize()
+    remaining_days = max((month_end.normalize() - today).days + 1, 0) if today.to_period("M") == selected_ts.to_period("M") else 0
+    daily_budget = int(max(budget_gap, 0) / remaining_days) if remaining_days and expense_budget else 0
+
+    cols = st.columns(3)
+    with cols[0]:
+        insight_card("最大支出カテゴリ", f"{top_category} / {yen(top_amount)}", "支出の偏りをすぐ確認できます")
+    with cols[1]:
+        insight_card("予算ステータス", f"{budget_status} {yen(abs(budget_gap))}", budget_note)
+    with cols[2]:
+        insight_card("残り1日の目安", yen(daily_budget), f"今月の残り {remaining_days}日で使える平均額")
+
+
 def render_transaction_form(tx_type: str, categories: list[str], selected_month: date) -> None:
     """支出または収入の追加フォームを表示します。"""
     title = type_label(tx_type)
     with st.form(f"add_{tx_type}_form", clear_on_submit=True):
         cols = st.columns([1, 1.2, 1.4, 1.7])
         tx_date = cols[0].date_input("日付", value=selected_month, key=f"{tx_type}_date")
-        amount = cols[1].number_input("金額", min_value=1, step=100, value=1000, key=f"{tx_type}_amount")
+        amount = cols[1].number_input("金額", min_value=0, step=100, value=0, key=f"{tx_type}_amount")
         category = cols[2].selectbox("カテゴリ", categories, key=f"{tx_type}_category")
         description = cols[3].text_input("説明", key=f"{tx_type}_description")
         if st.form_submit_button(f"{title}を追加", type="primary"):
+            if int(amount) <= 0:
+                st.warning("金額を入力してください。")
+                return
             save_transaction(tx_date, tx_type, category, int(amount), description)
             st.success(f"{title}を追加しました。")
             st.rerun()
@@ -981,7 +1106,9 @@ def render_transaction_page(month_df: pd.DataFrame, cat_df: pd.DataFrame, select
             render_transaction_editor(month_df, categories, tx_type)
 
 
-def render_monthly_page(month_df: pd.DataFrame, budgets_df: pd.DataFrame, cat_df: pd.DataFrame, opening: int, ending: int) -> None:
+def render_monthly_page(
+    month_df: pd.DataFrame, budgets_df: pd.DataFrame, cat_df: pd.DataFrame, opening: int, ending: int, selected_month: date
+) -> None:
     """月間収支ページを表示します。"""
     income = int(month_df.loc[month_df["type"] == "income", "amount"].sum())
     expense = int(month_df.loc[month_df["type"] == "expense", "amount"].sum())
@@ -998,6 +1125,8 @@ def render_monthly_page(month_df: pd.DataFrame, budgets_df: pd.DataFrame, cat_df
     with cols[3]:
         metric_card("貯蓄率", f"{saving_rate:.1f}%", "月初残高に対する増減")
 
+    st.divider()
+    render_monthly_insights(month_df, budgets_df, cat_df, selected_month)
     st.divider()
     left, right = st.columns([1.15, .85])
     with left:
@@ -1300,6 +1429,8 @@ def main() -> None:
         st.error("categoriesテーブルにデータがありません。先にカテゴリを登録してください。")
         st.stop()
 
+    selected_month = selected_month_from_state("main_month")
+    render_hero(selected_month)
     page, selected_month = render_top_controls(balance_ready, recurring_ready)
 
     start, end = month_range(selected_month)
@@ -1308,11 +1439,10 @@ def main() -> None:
     month_df = apply_recurring(month_manual_df, recurring_df, selected_month)
     opening, ending = month_balances(full_transactions_df, snapshots_df, selected_month)
 
-    render_hero(selected_month)
     if page == "収支入力":
         render_transaction_page(month_df, cat_df, selected_month)
     elif page == "月間収支":
-        render_monthly_page(month_df, budgets_df, cat_df, opening, ending)
+        render_monthly_page(month_df, budgets_df, cat_df, opening, ending, selected_month)
     elif page == "資産推移":
         render_asset_page(full_transactions_df, snapshots_df, selected_month)
     elif page == "設定":
