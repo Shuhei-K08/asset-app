@@ -487,6 +487,17 @@ def logout() -> None:
     st.rerun()
 
 
+def is_email_not_confirmed_error(exc: Exception) -> bool:
+    """Supabase Authのメール未確認エラーかどうか判定します。"""
+    message = str(exc).lower()
+    return "email not confirmed" in message or "email_not_confirmed" in message
+
+
+def resend_confirmation_email(email: str) -> None:
+    """Supabase Authの確認メールを再送します。"""
+    supabase.auth.resend({"type": "signup", "email": email.strip()})
+
+
 def require_login() -> None:
     """Supabase Authによるメールアドレス認証を実行します。"""
     restore_auth_session()
@@ -509,7 +520,21 @@ def require_login() -> None:
                     st.success("ログインしました。")
                     st.rerun()
                 except Exception as exc:
-                    st.error("ログインできませんでした。メールアドレスとパスワードを確認してください。")
+                    if is_email_not_confirmed_error(exc):
+                        st.warning("メール確認が完了していません。受信メールの確認リンクを開いてからログインしてください。")
+                        st.session_state.pending_confirmation_email = email.strip()
+                    else:
+                        st.error("ログインできませんでした。メールアドレスとパスワードを確認してください。")
+
+        pending_email = st.session_state.get("pending_confirmation_email")
+        if pending_email:
+            st.info(f"確認待ち: {pending_email}")
+            if st.button("確認メールを再送", key="resend_confirmation_email"):
+                try:
+                    resend_confirmation_email(pending_email)
+                    st.success("確認メールを再送しました。メール内のリンクを開いてください。")
+                except Exception as exc:
+                    st.error("確認メールを再送できませんでした。Supabase Authのメール設定を確認してください。")
                     st.exception(exc)
 
     with tab_signup:
@@ -534,7 +559,6 @@ def require_login() -> None:
                             st.info("確認メールを送信しました。メール認証後にログインしてください。")
                     except Exception as exc:
                         st.error("アカウントを作成できませんでした。")
-                        st.exception(exc)
 
     st.stop()
 
