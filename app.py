@@ -482,8 +482,8 @@ def logout() -> None:
         supabase.auth.sign_out()
     except Exception:
         pass
-    st.session_state.pop("auth_user", None)
-    st.session_state.pop("auth_tokens", None)
+    for key in ["auth_user", "auth_tokens", "pending_category_delete"]:
+        st.session_state.pop(key, None)
     st.rerun()
 
 
@@ -1035,8 +1035,8 @@ def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str
     with right:
         selected_month = month_selector("対象月", "main_month")
     with account:
-        st.caption(current_user_email())
-        if st.button("ログアウト", key="logout_button"):
+        st.caption("ACCOUNT")
+        if st.button("ログアウト", key="logout_button", use_container_width=True):
             logout()
 
     render_setup_notice(balance_ready, recurring_ready)
@@ -1922,6 +1922,16 @@ def render_budget_settings(cat_df: pd.DataFrame, budgets_df: pd.DataFrame) -> No
             st.caption(f"合計: {yen(data['予算'].sum())}")
 
 
+def render_account_settings() -> None:
+    """ログイン中アカウント情報とログアウト操作を表示します。"""
+    st.subheader("アカウント")
+    st.info(f"ログイン中: {current_user_email()}")
+    st.code(current_user_id(), language="text")
+    st.caption("この user_id に紐づくデータだけを表示・編集します。")
+    if st.button("ログアウト", type="primary", key="settings_logout_button"):
+        logout()
+
+
 def render_settings_page(
     snapshots_df: pd.DataFrame,
     recurring_df: pd.DataFrame,
@@ -1933,7 +1943,7 @@ def render_settings_page(
     """設定ページのサブメニューを表示します。"""
     st.markdown('<div class="section-title">設定</div>', unsafe_allow_html=True)
     setting_page = st.segmented_control(
-        "設定メニュー", ["基準残高", "定期収支", "カテゴリ", "予算"], default="基準残高", key="settings_menu"
+        "設定メニュー", ["基準残高", "定期収支", "カテゴリ", "予算", "アカウント"], default="基準残高", key="settings_menu"
     )
     if setting_page == "基準残高":
         render_snapshot_settings(snapshots_df)
@@ -1943,6 +1953,8 @@ def render_settings_page(
         render_category_settings(cat_df, transactions_df, budgets_df, recurring_df)
     elif setting_page == "予算":
         render_budget_settings(cat_df, budgets_df)
+    elif setting_page == "アカウント":
+        render_account_settings()
 
 
 def render_setup_notice(balance_ready: bool, recurring_ready: bool) -> None:
