@@ -445,6 +445,14 @@ def get_supabase_client():
     return create_client(required_secret("SUPABASE_URL"), required_secret("SUPABASE_KEY"))
 
 
+def get_admin_supabase_client():
+    """管理画面用のService Role Supabaseクライアントを作成します。"""
+    service_role_key = optional_secret("SUPABASE_SERVICE_ROLE_KEY")
+    if not service_role_key:
+        return None
+    return create_client(required_secret("SUPABASE_URL"), service_role_key)
+
+
 def optional_secret(name: str) -> str | None:
     """Streamlit secretsまたは環境変数から任意の設定値を取得します。"""
     try:
@@ -516,6 +524,34 @@ def current_user_email() -> str:
     """ログイン中ユーザーのメールアドレスを返します。"""
     user = st.session_state.get("auth_user") or {}
     return str(user.get("email") or "")
+
+
+def admin_emails() -> set[str]:
+    """管理者として扱うメールアドレス一覧を取得します。"""
+    raw = optional_secret("ADMIN_EMAILS") or ""
+    return {email.strip().lower() for email in raw.split(",") if email.strip()}
+
+
+def is_admin_user() -> bool:
+    """現在のログインユーザーが管理者かどうかを返します。"""
+    email = current_user_email().lower()
+    return bool(email and email in admin_emails())
+
+
+def upsert_user_profile() -> None:
+    """ログイン中ユーザーのプロフィール情報を保存します。"""
+    try:
+        supabase.table("app_profiles").upsert(
+            {
+                "user_id": current_user_id(),
+                "email": current_user_email(),
+                "is_admin": is_admin_user(),
+                "last_seen_at": pd.Timestamp.utcnow().isoformat(),
+            },
+            on_conflict="user_id",
+        ).execute()
+    except Exception:
+        pass
 
 
 def logout() -> None:
@@ -1087,12 +1123,15 @@ def insight_card(title: str, value: str, note: str) -> None:
 def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str, date]:
     """サイドバーの代わりになる上部ナビゲーションと対象月選択を表示します。"""
     pages = ["収支入力", "月間収支", "資産推移", "分析", "設定"]
+    if is_admin_user():
+        pages.append("管理")
     labels = {
         "収支入力": "入力",
         "月間収支": "月間",
         "資産推移": "推移",
         "分析": "分析",
         "設定": "設定",
+        "管理": "管理",
     }
 
     left, middle, right = st.columns([2.4, .95, 1.25])
@@ -2003,6 +2042,71 @@ def render_account_settings() -> None:
         logout()
 
 
+def admin_load_table(admin_client, table_name: str) -> pd.DataFrame:
+    """管理画面用にService Roleでテーブルを読み込みます。"""
+    response = admin_client.table(table_name).select("*").execute()
+    return pd.DataFrame(response.data or [])
+
+
+def render_admin_page() -> None:
+    """管理者専用ページを表示します。"""
+    st.markdown('<div class="section-title">管理</div>', unsafe_allow_html=True)
+    if not is_admin_user():
+        st.error("管理者権限がありません。")
+        return
+
+    admin_client = get_admin_supabase_client()
+    if admin_client is None:
+        st.warning("管理画面を有効にするには Streamlit Secrets に SUPABASE_SERVICE_ROLE_KEY を追加してください。")
+        st.code(
+            "ADMIN_EMAILS=\"your-email@example.com\"\nSUPABASE_SERVICE_ROLE_KEY=\"...\"",
+            language="toml",
+        )
+        st.caption("Service Role Keyはサーバー側専用です。ブラウザや公開リポジトリには絶対に出さないでください。")
+        return
+
+    profiles = admin_load_table(admin_client, "app_profiles")
+    tables = {
+        "transactions": admin_load_table(admin_client, "transactions"),
+        "categories": admin_load_table(admin_client, "categories"),
+        "budgets": admin_load_table(admin_client, "budgets"),
+        "balance_snapshots": admin_load_table(admin_client, "balance_snapshots"),
+        "recurring_transactions": admin_load_table(admin_client, "recurring_transactions"),
+    }
+
+    cols = st.columns(4)
+    with cols[0]:
+        metric_card("ユーザー数", f"{len(profiles)}", "app_profiles")
+    with cols[1]:
+        metric_card("取引数", f"{len(tables['transactions'])}", "全ユーザー合計")
+    with cols[2]:
+        total_amount = int(pd.to_numeric(tables["transactions"].get("amount", pd.Series(dtype=int)), errors="coerce").fillna(0).sum())
+        metric_card("取引金額合計", yen(total_amount), "収入・支出の単純合計")
+    with cols[3]:
+        metric_card("定期収支", f"{len(tables['recurring_transactions'])}", "登録件数")
+
+    st.divider()
+    st.subheader("ユーザー一覧")
+    if profiles.empty:
+        st.info("プロフィールデータがありません。ユーザーがログインすると自動作成されます。")
+    else:
+        profile_view = profiles.copy()
+        for table_name, df in tables.items():
+            if "user_id" in df.columns:
+                counts = df.groupby("user_id").size().rename(f"{table_name}_count")
+                profile_view = profile_view.merge(counts, on="user_id", how="left")
+        count_cols = [col for col in profile_view.columns if col.endswith("_count")]
+        profile_view[count_cols] = profile_view[count_cols].fillna(0).astype(int) if count_cols else profile_view[count_cols]
+        st.dataframe(profile_view, use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.subheader("テーブル件数")
+    table_counts = pd.DataFrame(
+        [{"テーブル": name, "件数": len(df)} for name, df in tables.items()]
+    )
+    st.dataframe(table_counts, use_container_width=True, hide_index=True)
+
+
 def render_settings_page(
     snapshots_df: pd.DataFrame,
     recurring_df: pd.DataFrame,
@@ -2080,6 +2184,7 @@ def main() -> None:
     global supabase
     supabase = get_supabase_client()
     require_login()
+    upsert_user_profile()
 
     try:
         cat_df, transactions_df, budgets_df, snapshots_df, recurring_df, balance_ready, recurring_ready = load_app_data()
@@ -2113,6 +2218,8 @@ def main() -> None:
         render_analysis_page(month_df, budgets_df, cat_df)
     elif page == "設定":
         render_settings_page(snapshots_df, recurring_df, cat_df, budgets_df, transactions_df, selected_month)
+    elif page == "管理":
+        render_admin_page()
 
 
 if __name__ == "__main__":
