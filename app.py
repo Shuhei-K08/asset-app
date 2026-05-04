@@ -398,9 +398,8 @@ def inject_styles() -> None:
     )
 
 
-@st.cache_resource
 def get_supabase_client():
-    """Streamlit secretsからSupabaseクライアントを作成してキャッシュします。"""
+    """Streamlit secretsからSupabaseクライアントを作成します。"""
     return create_client(required_secret("SUPABASE_URL"), required_secret("SUPABASE_KEY"))
 
 
@@ -420,26 +419,123 @@ def required_secret(name: str) -> str:
     return value
 
 
-def require_login() -> None:
-    """アプリ共通の簡易パスワード認証を実行します。"""
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
+def value_from_auth_object(obj: Any, key: str):
+    """Supabase Authの戻り値から属性またはdictキーで値を取り出します。"""
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
 
-    if st.session_state.authenticated:
+
+def store_auth_session(auth_response: Any) -> None:
+    """Supabase Authのセッション情報をsession_stateに保存します。"""
+    session = value_from_auth_object(auth_response, "session")
+    user = value_from_auth_object(auth_response, "user")
+    if session is None and user is None:
+        raise RuntimeError("ログイン情報を取得できませんでした。")
+
+    access_token = value_from_auth_object(session, "access_token")
+    refresh_token = value_from_auth_object(session, "refresh_token")
+    user_id = value_from_auth_object(user, "id")
+    email = value_from_auth_object(user, "email")
+    if not user_id:
+        raise RuntimeError("ユーザーIDを取得できませんでした。")
+
+    st.session_state.auth_user = {"id": user_id, "email": email}
+    st.session_state.auth_tokens = {"access_token": access_token, "refresh_token": refresh_token}
+
+
+def restore_auth_session() -> None:
+    """保存済みトークンをSupabaseクライアントへ再設定します。"""
+    tokens = st.session_state.get("auth_tokens")
+    if not tokens:
+        return
+    access_token = tokens.get("access_token")
+    refresh_token = tokens.get("refresh_token")
+    if access_token and refresh_token:
+        try:
+            supabase.auth.set_session(access_token, refresh_token)
+        except Exception:
+            st.session_state.pop("auth_user", None)
+            st.session_state.pop("auth_tokens", None)
+
+
+def current_user_id() -> str:
+    """ログイン中ユーザーのIDを返します。"""
+    user = st.session_state.get("auth_user") or {}
+    user_id = user.get("id")
+    if not user_id:
+        raise RuntimeError("ログインが必要です。")
+    return str(user_id)
+
+
+def current_user_email() -> str:
+    """ログイン中ユーザーのメールアドレスを返します。"""
+    user = st.session_state.get("auth_user") or {}
+    return str(user.get("email") or "")
+
+
+def logout() -> None:
+    """ログアウトしてセッション情報を破棄します。"""
+    try:
+        supabase.auth.sign_out()
+    except Exception:
+        pass
+    st.session_state.pop("auth_user", None)
+    st.session_state.pop("auth_tokens", None)
+    st.rerun()
+
+
+def require_login() -> None:
+    """Supabase Authによるメールアドレス認証を実行します。"""
+    restore_auth_session()
+    if st.session_state.get("auth_user"):
         return
 
     st.title("ログイン")
-    app_password = optional_secret("APP_PASSWORD")
-    if not app_password:
-        st.error("APP_PASSWORD が設定されていません。.streamlit/secrets.toml または環境変数を確認してください。")
-        st.stop()
+    st.caption("Supabase Authでユーザーごとにデータを分離します。")
+    tab_login, tab_signup = st.tabs(["ログイン", "アカウント作成"])
 
-    password = st.text_input("パスワードを入力してください", type="password")
-    if st.button("ログイン"):
-        if password == app_password:
-            st.session_state.authenticated = True
-            st.rerun()
-        st.error("パスワードが違います")
+    with tab_login:
+        with st.form("auth_login_form"):
+            email = st.text_input("メールアドレス", key="auth_login_email")
+            password = st.text_input("パスワード", type="password", key="auth_login_password")
+            submitted = st.form_submit_button("ログイン", type="primary")
+            if submitted:
+                try:
+                    response = supabase.auth.sign_in_with_password({"email": email.strip(), "password": password})
+                    store_auth_session(response)
+                    st.success("ログインしました。")
+                    st.rerun()
+                except Exception as exc:
+                    st.error("ログインできませんでした。メールアドレスとパスワードを確認してください。")
+                    st.exception(exc)
+
+    with tab_signup:
+        with st.form("auth_signup_form"):
+            email = st.text_input("メールアドレス", key="auth_signup_email")
+            password = st.text_input("パスワード", type="password", key="auth_signup_password")
+            password_confirm = st.text_input("パスワード確認", type="password", key="auth_signup_password_confirm")
+            submitted = st.form_submit_button("アカウントを作成", type="primary")
+            if submitted:
+                if password != password_confirm:
+                    st.error("パスワードが一致しません。")
+                elif len(password) < 8:
+                    st.error("パスワードは8文字以上にしてください。")
+                else:
+                    try:
+                        response = supabase.auth.sign_up({"email": email.strip(), "password": password})
+                        try:
+                            store_auth_session(response)
+                            st.success("アカウントを作成しました。")
+                            st.rerun()
+                        except Exception:
+                            st.info("確認メールを送信しました。メール認証後にログインしてください。")
+                    except Exception as exc:
+                        st.error("アカウントを作成できませんでした。")
+                        st.exception(exc)
+
     st.stop()
 
 
@@ -516,7 +612,7 @@ def ensure_columns(df: pd.DataFrame, defaults: dict[str, Any]) -> pd.DataFrame:
 
 def load_table(table_name: str, limit: int = 10000) -> pd.DataFrame:
     """Supabaseからテーブルを読み込みDataFrameに変換します。"""
-    query = supabase.table(table_name).select("*").limit(limit)
+    query = supabase.table(table_name).select("*").eq("user_id", current_user_id()).limit(limit)
     if table_name == "transactions":
         query = query.order("date", desc=False)
     response = query.execute()
@@ -599,6 +695,7 @@ def save_transaction(tx_date: date | pd.Timestamp, tx_type: str, category: str, 
     """取引を1件追加します。"""
     supabase.table("transactions").insert(
         {
+            "user_id": current_user_id(),
             "date": pd.Timestamp(tx_date).date().isoformat(),
             "type": tx_type,
             "amount": int(amount),
@@ -612,17 +709,17 @@ def update_transaction(transaction_id: int, amount: int, category: str, descript
     """取引の金額・カテゴリ・説明を更新します。"""
     supabase.table("transactions").update(
         {"amount": int(amount), "category": category, "description": description or ""}
-    ).eq("id", int(transaction_id)).execute()
+    ).eq("user_id", current_user_id()).eq("id", int(transaction_id)).execute()
 
 
 def delete_transaction(transaction_id: int) -> None:
     """取引を1件削除します。"""
-    supabase.table("transactions").delete().eq("id", int(transaction_id)).execute()
+    supabase.table("transactions").delete().eq("user_id", current_user_id()).eq("id", int(transaction_id)).execute()
 
 
 def save_category(name: str, category_type: str) -> None:
     """カテゴリを1件追加します。"""
-    payload = {"name": name.strip(), "type": category_type, "is_deleted": False}
+    payload = {"user_id": current_user_id(), "name": name.strip(), "type": category_type, "is_deleted": False}
     try:
         supabase.table("categories").insert(payload).execute()
     except Exception:
@@ -633,14 +730,14 @@ def save_category(name: str, category_type: str) -> None:
 def delete_category(category_id: int) -> None:
     """カテゴリを論理削除し、列がない場合は物理削除にフォールバックします。"""
     try:
-        supabase.table("categories").update({"is_deleted": True}).eq("id", int(category_id)).execute()
+        supabase.table("categories").update({"is_deleted": True}).eq("user_id", current_user_id()).eq("id", int(category_id)).execute()
     except Exception:
-        supabase.table("categories").delete().eq("id", int(category_id)).execute()
+        supabase.table("categories").delete().eq("user_id", current_user_id()).eq("id", int(category_id)).execute()
 
 
 def rename_category(category_id: int, old_name: str, new_name: str) -> None:
     """カテゴリ名を変更し、既存データ内のカテゴリ文字列も更新します。"""
-    supabase.table("categories").update({"name": new_name.strip()}).eq("id", int(category_id)).execute()
+    supabase.table("categories").update({"name": new_name.strip()}).eq("user_id", current_user_id()).eq("id", int(category_id)).execute()
     reassign_category_references(old_name, new_name.strip())
 
 
@@ -648,15 +745,15 @@ def reassign_category_references(old_name: str, new_name: str) -> None:
     """取引・予算・定期収支に保存済みのカテゴリ名を付け替えます。"""
     for table_name in ["transactions", "recurring_transactions"]:
         try:
-            supabase.table(table_name).update({"category": new_name}).eq("category", old_name).execute()
+            supabase.table(table_name).update({"category": new_name}).eq("user_id", current_user_id()).eq("category", old_name).execute()
         except Exception:
             pass
 
     try:
-        supabase.table("budgets").update({"category": new_name}).eq("category", old_name).execute()
+        supabase.table("budgets").update({"category": new_name}).eq("user_id", current_user_id()).eq("category", old_name).execute()
     except Exception:
         try:
-            supabase.table("budgets").delete().eq("category", old_name).execute()
+            supabase.table("budgets").delete().eq("user_id", current_user_id()).eq("category", old_name).execute()
         except Exception:
             pass
 
@@ -675,20 +772,24 @@ def category_name_by_id(cat_df: pd.DataFrame, category_id: int) -> str:
 
 def save_budget(category: str, amount: int) -> None:
     """カテゴリ別の月次予算を保存します。"""
-    supabase.table("budgets").upsert({"category": category, "amount": int(amount)}, on_conflict="category").execute()
+    supabase.table("budgets").upsert(
+        {"user_id": current_user_id(), "category": category, "amount": int(amount)},
+        on_conflict="user_id,category",
+    ).execute()
 
 
 def save_balance_snapshot(snapshot_month: date, balance: int) -> None:
     """基準残高を単一レコードとして保存し直します。"""
-    supabase.table("balance_snapshots").delete().neq("id", 0).execute()
+    supabase.table("balance_snapshots").delete().eq("user_id", current_user_id()).neq("id", 0).execute()
     supabase.table("balance_snapshots").insert(
-        {"snapshot_month": first_day(snapshot_month).isoformat(), "balance": int(balance)}
+        {"user_id": current_user_id(), "snapshot_month": first_day(snapshot_month).isoformat(), "balance": int(balance)}
     ).execute()
 
 
 def save_recurring(tx_type: str, day: int, amount: int, category: str, desc: str, start_month: pd.Timestamp, end_month) -> None:
     """定期収支を1件追加します。"""
     base_payload = {
+        "user_id": current_user_id(),
         "day": int(day),
         "type": tx_type,
         "amount": int(amount),
@@ -718,20 +819,22 @@ def save_recurring(tx_type: str, day: int, amount: int, category: str, desc: str
 def update_recurring(recurring_id: int, end_month) -> None:
     """定期収支の終了月を更新します。"""
     end_month_str = pd.Timestamp(end_month).strftime("%Y-%m-%d") if pd.notna(end_month) else None
-    supabase.table("recurring_transactions").update({"end_month": end_month_str}).eq("id", int(recurring_id)).execute()
+    supabase.table("recurring_transactions").update({"end_month": end_month_str}).eq("user_id", current_user_id()).eq("id", int(recurring_id)).execute()
 
 
 def delete_recurring(recurring_id: int, delete_mode: str, selected_month: date) -> None:
     """定期収支を全削除または指定月以降停止にします。"""
     if delete_mode == "all":
         try:
-            supabase.table("recurring_transactions").update({"is_deleted": True}).eq("id", int(recurring_id)).execute()
+            supabase.table("recurring_transactions").update({"is_deleted": True}).eq("user_id", current_user_id()).eq("id", int(recurring_id)).execute()
         except Exception:
-            supabase.table("recurring_transactions").delete().eq("id", int(recurring_id)).execute()
+            supabase.table("recurring_transactions").delete().eq("user_id", current_user_id()).eq("id", int(recurring_id)).execute()
         return
 
     stop_month = pd.Timestamp(selected_month).to_period("M").to_timestamp()
     supabase.table("recurring_transactions").update({"end_month": stop_month.strftime("%Y-%m-%d")}).eq(
+        "user_id", current_user_id()
+    ).eq(
         "id", int(recurring_id)
     ).execute()
 
@@ -917,7 +1020,7 @@ def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str
         "設定": "設定",
     }
 
-    left, middle, right = st.columns([2.4, .95, 1.25])
+    left, middle, right, account = st.columns([2.4, .95, 1.25, .9])
     with left:
         st.markdown('<div class="nav-caption">NAVIGATION</div>', unsafe_allow_html=True)
         page_label = st.segmented_control(
@@ -931,6 +1034,10 @@ def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str
         st.toggle("スマホ用カード表示", value=False, key="mobile_card_mode")
     with right:
         selected_month = month_selector("対象月", "main_month")
+    with account:
+        st.caption(current_user_email())
+        if st.button("ログアウト", key="logout_button"):
+            logout()
 
     render_setup_notice(balance_ready, recurring_ready)
     reverse_labels = {value: key for key, value in labels.items()}
@@ -1868,14 +1975,30 @@ def load_app_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFr
     )
 
 
+def seed_default_categories() -> None:
+    """新規ユーザー向けの初期カテゴリを作成します。"""
+    defaults = [
+        ("固定費", "expense"),
+        ("食費", "expense"),
+        ("日用品", "expense"),
+        ("交通費", "expense"),
+        ("娯楽", "expense"),
+        ("給与", "income"),
+        ("副収入", "income"),
+    ]
+    for name, category_type in defaults:
+        save_category(name, category_type)
+
+
 def main() -> None:
     """Streamlitアプリのエントリーポイントです。"""
     inject_styles()
-    require_login()
 
     global supabase
+    supabase = get_supabase_client()
+    require_login()
+
     try:
-        supabase = get_supabase_client()
         cat_df, transactions_df, budgets_df, snapshots_df, recurring_df, balance_ready, recurring_ready = load_app_data()
     except Exception as exc:
         st.error("Supabaseに接続できませんでした。secrets.toml の SUPABASE_URL / SUPABASE_KEY を確認してください。")
@@ -1883,8 +2006,8 @@ def main() -> None:
         st.stop()
 
     if cat_df.empty:
-        st.error("categoriesテーブルにデータがありません。先にカテゴリを登録してください。")
-        st.stop()
+        seed_default_categories()
+        cat_df, transactions_df, budgets_df, snapshots_df, recurring_df, balance_ready, recurring_ready = load_app_data()
 
     selected_month = selected_month_from_state("main_month")
     render_hero(selected_month)
