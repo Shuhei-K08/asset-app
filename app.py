@@ -49,6 +49,7 @@ def inject_styles() -> None:
             padding-bottom: 3rem;
         }}
         .app-hero {{
+            position: relative;
             display: flex;
             align-items: flex-end;
             justify-content: space-between;
@@ -80,6 +81,35 @@ def inject_styles() -> None:
             font-weight: 700;
             white-space: nowrap;
         }}
+        .hero-actions {{
+            position: absolute;
+            top: .65rem;
+            right: .85rem;
+            display: flex;
+            align-items: center;
+            gap: .6rem;
+            color: rgba(255, 255, 255, .58);
+            font-size: .74rem;
+            font-weight: 750;
+        }}
+        .hero-actions form {{
+            margin: 0;
+        }}
+        .hero-actions [data-testid="stButton"] button {{
+            min-height: 0;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            box-shadow: none;
+            color: rgba(255, 255, 255, .62);
+            font-size: .74rem;
+            font-weight: 800;
+        }}
+        .hero-actions [data-testid="stButton"] button:hover {{
+            color: white;
+            background: transparent;
+            box-shadow: none;
+        }}
         .control-strip {{
             padding: .7rem .8rem .6rem;
             margin-bottom: 1rem;
@@ -107,31 +137,6 @@ def inject_styles() -> None:
             font-size: .72rem;
             font-weight: 800;
             margin: 0 0 .15rem;
-        }}
-        .account-chip {{
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: .55rem;
-            min-height: 2.35rem;
-            padding: .35rem .55rem .35rem .7rem;
-            border: 1px solid rgba(219, 225, 234, .95);
-            border-radius: 8px;
-            background: rgba(255, 255, 255, .86);
-            color: {INK};
-            font-size: .78rem;
-            font-weight: 800;
-            overflow: hidden;
-        }}
-        .account-email {{
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }}
-        .account-link {{
-            color: {ACCENT_DARK};
-            white-space: nowrap;
-            font-size: .74rem;
         }}
         div[data-testid="stSegmentedControl"] {{
             gap: .25rem;
@@ -359,6 +364,18 @@ def inject_styles() -> None:
             border: 0;
             color: white;
             background: linear-gradient(135deg, {ACCENT_DARK}, {ACCENT});
+        }}
+        .stButton > button[kind="secondary"] {{
+            color: {MUTED};
+            border: 1px solid rgba(219, 225, 234, .65);
+            background: rgba(255, 255, 255, .36);
+            box-shadow: none;
+        }}
+        .stButton > button[kind="secondary"]:hover {{
+            color: {INK};
+            border: 1px solid rgba(219, 225, 234, .95);
+            background: rgba(255, 255, 255, .72);
+            box-shadow: none;
         }}
         div[data-testid="stMetricValue"] {{ color: {NAVY}; }}
         div[data-testid="stDataFrame"] {{
@@ -1030,6 +1047,15 @@ def render_hero(selected_month: date) -> None:
     )
 
 
+def render_header_account_actions() -> None:
+    """ヘッダー上部に控えめなアカウント操作を表示します。"""
+    spacer, account = st.columns([4.6, 1])
+    with account:
+        st.caption(current_user_email())
+        if st.button("ログアウト", key="hero_logout_button", type="secondary", use_container_width=True):
+            logout()
+
+
 def metric_card(label: str, value: str, sub: str = "") -> None:
     """カード型のKPIを表示します。"""
     st.markdown(
@@ -1069,7 +1095,7 @@ def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str
         "設定": "設定",
     }
 
-    left, middle, right, account = st.columns([2.35, .9, 1.2, 1.25])
+    left, middle, right = st.columns([2.4, .95, 1.25])
     with left:
         st.markdown('<div class="nav-caption">NAVIGATION</div>', unsafe_allow_html=True)
         page_label = st.segmented_control(
@@ -1083,17 +1109,6 @@ def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str
         st.toggle("スマホ用カード表示", value=False, key="mobile_card_mode")
     with right:
         selected_month = month_selector("対象月", "main_month")
-    with account:
-        st.markdown('<div class="nav-caption">ACCOUNT</div>', unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="account-chip">
-                <span class="account-email">{current_user_email()}</span>
-                <span class="account-link">設定でログアウト</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
     render_setup_notice(balance_ready, recurring_ready)
     reverse_labels = {value: key for key, value in labels.items()}
@@ -2078,6 +2093,7 @@ def main() -> None:
         cat_df, transactions_df, budgets_df, snapshots_df, recurring_df, balance_ready, recurring_ready = load_app_data()
 
     selected_month = selected_month_from_state("main_month")
+    render_header_account_actions()
     render_hero(selected_month)
     page, selected_month = render_top_controls(balance_ready, recurring_ready)
 
