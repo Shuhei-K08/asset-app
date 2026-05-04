@@ -688,7 +688,7 @@ def save_balance_snapshot(snapshot_month: date, balance: int) -> None:
 
 def save_recurring(tx_type: str, day: int, amount: int, category: str, desc: str, start_month: pd.Timestamp, end_month) -> None:
     """定期収支を1件追加します。"""
-    payload = {
+    base_payload = {
         "day": int(day),
         "type": tx_type,
         "amount": int(amount),
@@ -699,11 +699,20 @@ def save_recurring(tx_type: str, day: int, amount: int, category: str, desc: str
         "active": True,
         "is_deleted": False,
     }
-    try:
-        supabase.table("recurring_transactions").insert(payload).execute()
-    except Exception:
-        payload.pop("is_deleted", None)
-        supabase.table("recurring_transactions").insert(payload).execute()
+    optional_columns = ["is_deleted", "active", "day"]
+    last_error = None
+
+    for remove_count in range(len(optional_columns) + 1):
+        payload = base_payload.copy()
+        for column in optional_columns[:remove_count]:
+            payload.pop(column, None)
+        try:
+            supabase.table("recurring_transactions").insert(payload).execute()
+            return
+        except Exception as exc:
+            last_error = exc
+
+    raise last_error
 
 
 def update_recurring(recurring_id: int, end_month) -> None:
@@ -1427,9 +1436,16 @@ def render_recurring_settings(recurring_df: pd.DataFrame, cat_df: pd.DataFrame, 
         end_month = st.date_input("終了月", value=selected_month, disabled=not use_end)
         desc = st.text_input("説明")
         if st.form_submit_button("定期収支を追加", type="primary"):
-            save_recurring(recurring_type, int(day), int(amount), category, desc, pd.Timestamp(start_month), end_month if use_end else None)
-            st.success("定期収支を追加しました。")
-            st.rerun()
+            if int(amount) <= 0:
+                st.warning("金額を入力してください。")
+            else:
+                try:
+                    save_recurring(recurring_type, int(day), int(amount), category, desc, pd.Timestamp(start_month), end_month if use_end else None)
+                    st.success("定期収支を追加しました。")
+                    st.rerun()
+                except APIError as exc:
+                    st.error("定期収支を保存できませんでした。Supabaseの recurring_transactions テーブル定義を確認してください。")
+                    st.exception(exc)
 
     st.divider()
     tabs = st.tabs(["💸 支出", "💰 収入"])
