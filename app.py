@@ -391,9 +391,6 @@ def inject_styles() -> None:
             .action-grid {{
                 grid-template-columns: 1fr;
             }}
-            div[data-testid="stDataFrame"] {{
-                display: none;
-            }}
         }}
         </style>
         """,
@@ -666,8 +663,14 @@ def reassign_category_references(old_name: str, new_name: str) -> None:
 
 def delete_category_with_reassignment(category_id: int, old_name: str, new_name: str) -> None:
     """カテゴリに紐づくデータを移行してからカテゴリを削除します。"""
-    reassign_category_references(old_name, new_name)
+    reassign_category_references(old_name.strip(), new_name.strip())
     delete_category(category_id)
+
+
+def category_name_by_id(cat_df: pd.DataFrame, category_id: int) -> str:
+    """カテゴリIDからカテゴリ名を取得します。"""
+    matched = cat_df.loc[cat_df["id"].astype(int) == int(category_id), "name"]
+    return str(matched.iloc[0]) if not matched.empty else ""
 
 
 def save_budget(category: str, amount: int) -> None:
@@ -1099,7 +1102,7 @@ def render_transaction_editor(month_df: pd.DataFrame, categories: list[str], tx_
         st.info("手入力のデータがありません。")
         return
 
-    render_mobile_transaction_cards(data, tx_type)
+    render_transaction_card_editor(data, categories, tx_type)
     editor = data[["id", "date", "amount", "category", "description"]].copy()
     editor["削除"] = False
     edited = st.data_editor(
@@ -1141,6 +1144,49 @@ def render_transaction_editor(month_df: pd.DataFrame, categories: list[str], tx_
 
         st.success(f"削除:{len(delete_rows)}件 / 更新:{changed_count}件")
         st.rerun()
+
+
+def render_transaction_card_editor(data: pd.DataFrame, categories: list[str], tx_type: str) -> None:
+    """スマホでも操作しやすい1件単位の取引編集フォームを表示します。"""
+    st.caption("カード編集")
+    for _, row in data.sort_values("date", ascending=False).iterrows():
+        transaction_id = int(row["id"])
+        title = str(row.get("description") or row.get("category") or type_label(tx_type))
+        with st.expander(f"{format_jp_date(row['date'])} / {title} / {yen(row['amount'])}"):
+            with st.form(f"transaction_card_edit_{tx_type}_{transaction_id}"):
+                amount = st.number_input(
+                    "金額",
+                    min_value=0,
+                    step=100,
+                    value=int(row["amount"]),
+                    key=f"card_amount_{tx_type}_{transaction_id}",
+                )
+                current_category = str(row.get("category") or "")
+                category_index = categories.index(current_category) if current_category in categories else 0
+                category = st.selectbox(
+                    "カテゴリ",
+                    categories,
+                    index=category_index,
+                    key=f"card_category_{tx_type}_{transaction_id}",
+                )
+                description = st.text_input(
+                    "説明",
+                    value=str(row.get("description") or ""),
+                    key=f"card_description_{tx_type}_{transaction_id}",
+                )
+                delete_this = st.checkbox("この取引を削除する", key=f"card_delete_{tx_type}_{transaction_id}")
+                submitted = st.form_submit_button("保存")
+                if submitted:
+                    if delete_this:
+                        delete_transaction(transaction_id)
+                        st.success("削除しました。")
+                        st.rerun()
+                    if int(amount) <= 0:
+                        st.error("金額は1円以上で入力してください。")
+                        return
+                    update_transaction(transaction_id, int(amount), category, description)
+                    st.success("更新しました。")
+                    st.rerun()
 
 
 def render_transaction_page(month_df: pd.DataFrame, cat_df: pd.DataFrame, selected_month: date) -> None:
@@ -1374,7 +1420,7 @@ def render_recurring_settings(recurring_df: pd.DataFrame, cat_df: pd.DataFrame, 
         with tab:
             df = recurring_df[(recurring_df["type"] == tx_type) & (~recurring_df["is_deleted"])].copy()
             recurring_cards = recurring_display_frame(df)
-            render_mobile_table_cards(recurring_cards, "カテゴリ", "金額", ["種別", "日", "開始月", "終了月"])
+            render_recurring_card_editor(df, tx_type, selected_month)
             edited = st.data_editor(
                 recurring_cards,
                 key=f"recurring_editor_{tx_type}",
@@ -1399,6 +1445,40 @@ def render_recurring_settings(recurring_df: pd.DataFrame, cat_df: pd.DataFrame, 
                     update_recurring(int(row["ID"]), row["終了月"])
                 st.success(f"{len(edited)}件を確認しました。")
                 st.rerun()
+
+
+def render_recurring_card_editor(df: pd.DataFrame, tx_type: str, selected_month: date) -> None:
+    """スマホでも操作しやすい定期収支の1件単位編集フォームを表示します。"""
+    if df.empty:
+        st.info("データがありません。")
+        return
+
+    st.caption("カード編集")
+    for _, row in df.sort_values("start_month", ascending=False).iterrows():
+        recurring_id = int(row["id"])
+        title = f"{row['category']} / {yen(row['amount'])}"
+        with st.expander(title):
+            st.caption(f"{type_label(tx_type)} / 毎月{int(row['day'])}日 / 開始 {format_month(row['start_month'])}")
+            with st.form(f"recurring_card_edit_{tx_type}_{recurring_id}"):
+                has_end = pd.notna(row["end_month"])
+                use_end = st.checkbox("終了月を設定", value=has_end, key=f"recurring_card_use_end_{recurring_id}")
+                default_end = pd.Timestamp(row["end_month"]).date() if has_end else selected_month
+                end_month = st.date_input("終了月", value=default_end, disabled=not use_end, key=f"recurring_card_end_{recurring_id}")
+                delete_mode = st.radio(
+                    "削除方法",
+                    ["削除しない", "全て削除", "選択月以降を停止"],
+                    horizontal=True,
+                    key=f"recurring_card_delete_mode_{recurring_id}",
+                )
+                submitted = st.form_submit_button("保存")
+                if submitted:
+                    if delete_mode != "削除しない":
+                        delete_recurring(recurring_id, "all" if delete_mode == "全て削除" else "future", selected_month)
+                        st.success("削除設定を反映しました。")
+                        st.rerun()
+                    update_recurring(recurring_id, end_month if use_end else None)
+                    st.success("更新しました。")
+                    st.rerun()
 
 
 def categories_display_frame(cat_df: pd.DataFrame) -> pd.DataFrame:
@@ -1473,7 +1553,15 @@ def render_category_rename_form(
         return
 
     with st.form("category_rename_form"):
-        old_name = st.selectbox("変更するカテゴリ", options)
+        scoped = active[active["type"] == tx_type].copy()
+        source_ids = scoped["id"].astype(int).tolist()
+        source_id = st.selectbox(
+            "変更するカテゴリ",
+            source_ids,
+            key="rename_source_category_id",
+            format_func=lambda category_id: category_name_by_id(scoped, int(category_id)),
+        )
+        old_name = category_name_by_id(scoped, int(source_id))
         usage = category_usage_counts(old_name, transactions_df, budgets_df, recurring_df)
         st.caption(f"紐づく取引 {usage['transactions']}件 / 予算 {usage['budgets']}件 / 定期収支 {usage['recurring']}件も同時に変更します。")
         new_name = st.text_input("新しいカテゴリ名", value=old_name)
@@ -1487,8 +1575,7 @@ def render_category_rename_form(
             elif new_name == old_name:
                 st.info("変更はありません。")
             else:
-                category_id = int(active.loc[active["name"] == old_name, "id"].iloc[0])
-                rename_category(category_id, old_name, new_name)
+                rename_category(int(source_id), old_name, new_name)
                 st.success(f"{old_name} を {new_name} に変更しました。")
                 st.rerun()
 
@@ -1511,20 +1598,37 @@ def render_category_delete_form(
         return
 
     with st.form("category_delete_reassign_form"):
-        old_name = st.selectbox("削除するカテゴリ", options)
+        scoped = active[active["type"] == tx_type].copy()
+        source_ids = scoped["id"].astype(int).tolist()
+        source_id = st.selectbox(
+            "削除するカテゴリ",
+            source_ids,
+            key="delete_source_category_id",
+            format_func=lambda category_id: category_name_by_id(scoped, int(category_id)),
+        )
+        old_name = category_name_by_id(scoped, int(source_id))
         usage = category_usage_counts(old_name, transactions_df, budgets_df, recurring_df)
         st.caption(f"移行対象: 取引 {usage['transactions']}件 / 予算 {usage['budgets']}件 / 定期収支 {usage['recurring']}件")
-        mode = st.radio("移行先", ["既存カテゴリ", "新規カテゴリを作成"], horizontal=True)
+        mode = st.radio("移行先", ["既存カテゴリ", "新規カテゴリを作成"], horizontal=True, key="delete_target_mode")
 
         target_name = ""
         if mode == "既存カテゴリ":
-            target_options = [name for name in options if name != old_name]
-            if not target_options:
+            target_ids = [category_id for category_id in source_ids if category_id != int(source_id)]
+            if not target_ids:
                 st.warning("同じ種別の移行先カテゴリがありません。新規カテゴリを作成してください。")
             else:
-                target_name = st.selectbox("移行先カテゴリ", target_options)
+                target_id = st.selectbox(
+                    "移行先カテゴリ",
+                    target_ids,
+                    key=f"delete_target_category_id_{int(source_id)}",
+                    format_func=lambda category_id: category_name_by_id(scoped, int(category_id)),
+                )
+                target_name = category_name_by_id(scoped, int(target_id))
         else:
-            target_name = st.text_input("新規カテゴリ名")
+            target_name = st.text_input("新規カテゴリ名", key="delete_new_category_name")
+
+        if target_name:
+            st.caption(f"実行時の移行先: {target_name}")
 
         confirm = st.checkbox("紐づくデータを移行してから削除する")
         submitted = st.form_submit_button("移行してカテゴリを削除", type="primary")
@@ -1541,8 +1645,7 @@ def render_category_delete_form(
             else:
                 if mode == "新規カテゴリを作成":
                     save_category(target_name, tx_type)
-                category_id = int(active.loc[active["name"] == old_name, "id"].iloc[0])
-                delete_category_with_reassignment(category_id, old_name, target_name)
+                delete_category_with_reassignment(int(source_id), old_name, target_name)
                 st.success(f"{old_name} のデータを {target_name} に移行して削除しました。")
                 st.rerun()
 
@@ -1566,6 +1669,7 @@ def render_category_settings(
 ) -> None:
     """カテゴリの追加・名称変更・削除移行画面を表示します。"""
     st.subheader("カテゴリ")
+    st.caption("スマホでは、名称変更と削除・移行タブのフォームから1件ずつ安全に編集できます。")
     render_category_stats(cat_df, transactions_df, budgets_df, recurring_df)
     tabs = st.tabs(["追加", "名称変更", "削除・移行", "一覧"])
     with tabs[0]:
