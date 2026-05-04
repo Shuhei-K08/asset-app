@@ -244,7 +244,46 @@ def load_table_or_empty(table_name):
     except Exception as e:
         print(f"[load error] {table_name}:", e)
         return pd.DataFrame()
+    
+def safe_update_transaction(row):
 
+    import pandas as pd
+
+    # =========================
+    # 🔥 強制的に整数化
+    # =========================
+    raw = row["amount_new"]
+
+    # 文字列でもfloatでも全部潰す
+    raw_str = str(raw).replace(",", "").strip()
+
+    try:
+        amount = int(float(raw_str))
+    except Exception as e:
+        print("変換エラー:", raw, e)
+        amount = 0
+
+    # 念のため最終確認
+    print("送信値:", amount, type(amount))
+
+    # =========================
+    # 文字列安全化
+    # =========================
+    category = str(row["category_new"]) if pd.notna(row["category_new"]) else ""
+    description = str(row["description_new"]) if pd.notna(row["description_new"]) else ""
+
+    # =========================
+    # DB更新
+    # =========================
+    supabase.table("transactions") \
+        .update({
+            "amount": amount,
+            "category": category,
+            "description": description
+        }) \
+        .eq("id", int(row["id"])) \
+        .execute()
+    
 def normalize_transactions(data: pd.DataFrame) -> pd.DataFrame:
     if data.empty:
         return pd.DataFrame(columns=["id", "date", "type", "amount", "category", "description", "signed_amount"])
@@ -261,6 +300,109 @@ def normalize_transactions(data: pd.DataFrame) -> pd.DataFrame:
     )
     return data.dropna(subset=["date"])
 
+def update_transaction(id, amount, category, description):
+
+    supabase.table("transactions") \
+        .update({
+            "amount": amount,
+            "category": category,
+            "description": description
+        }) \
+        .eq("id", id) \
+        .execute()
+def render_transaction_editor(month_df, category_list):
+
+    import streamlit as st
+    import pandas as pd
+
+    if month_df.empty:
+        st.info("データがありません")
+        return
+
+    editable_df = month_df.copy()
+
+    # =========================
+    # エディタ
+    # =========================
+    edited_df = st.data_editor(
+        editable_df,
+        num_rows="fixed",
+        width="stretch",
+        disabled=["id", "date"],
+        column_config={
+            "amount": st.column_config.NumberColumn("金額", step=1),
+            "category": st.column_config.SelectboxColumn("カテゴリ", options=category_list),
+            "description": st.column_config.TextColumn("説明"),
+        }
+    )
+
+    # =========================
+    # 保存処理
+    # =========================
+    if st.button("変更を保存", key="edit_save"):
+
+        # =========================
+        # マージ
+        # =========================
+        merged = edited_df.merge(
+            month_df,
+            on="id",
+            suffixes=("_new", "_old")
+        )
+
+        # =========================
+        # 🔥 型統一（超重要）
+        # =========================
+        merged["amount_new"] = pd.to_numeric(merged["amount_new"], errors="coerce").fillna(0)
+        merged["amount_old"] = pd.to_numeric(merged["amount_old"], errors="coerce").fillna(0)
+
+        merged["description_new"] = merged["description_new"].fillna("")
+        merged["description_old"] = merged["description_old"].fillna("")
+
+        # intで比較（これが本質）
+        merged["amount_new_int"] = merged["amount_new"].astype(int)
+        merged["amount_old_int"] = merged["amount_old"].astype(int)
+
+        # =========================
+        # 差分判定
+        # =========================
+        changed = merged[
+            (merged["amount_new_int"] != merged["amount_old_int"]) |
+            (merged["category_new"] != merged["category_old"]) |
+            (merged["description_new"] != merged["description_old"])
+        ]
+
+        update_count = 0
+
+        # =========================
+        # 更新
+        # =========================
+        for _, row in changed.iterrows():
+
+            if pd.isna(row["id"]):
+                continue
+
+            amount = int(row["amount_new_int"])
+            category = str(row["category_new"]) if pd.notna(row["category_new"]) else ""
+            description = str(row["description_new"]) if pd.notna(row["description_new"]) else ""
+
+            supabase.table("transactions") \
+                .update({
+                    "amount": amount,
+                    "category": category,
+                    "description": description
+                }) \
+                .eq("id", int(row["id"])) \
+                .execute()
+
+            update_count += 1
+
+        if update_count > 0:
+            st.success(f"{update_count}件更新しました")
+        else:
+            st.info("変更はありません")
+
+        st.rerun()
 
 def normalize_budgets(data: pd.DataFrame) -> pd.DataFrame:
     if data.empty:
@@ -626,7 +768,7 @@ def monthly_asset_series(transactions_df: pd.DataFrame, snapshots_df: pd.DataFra
 
     return pd.concat([base_row, monthly.rename("月末残高")]).to_frame()
 
-def render_transaction_block(month_df, tx_type, title, categories, selected_month):
+def render_transaction_block(month_df, tx_type, title, categories, selected_month,ttype="expense"  ):
 
     base_key = f"{tx_type}_{title}"
 
@@ -640,7 +782,7 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
     # =========================
     # 入力フォーム
     # =========================
-    with st.form(f"{base_key}_form", clear_on_submit=True):
+    with st.form(f"{base_key}_{selected_month}_{ttype}_form", clear_on_submit=True):
 
         cols = st.columns([1, 2, 1.5])
 
@@ -668,65 +810,6 @@ def render_transaction_block(month_df, tx_type, title, categories, selected_mont
                 st.error(e)
 
     st.markdown("---")
-
-    # =========================
-    # 一覧（削除）
-    # =========================
-    df = month_df[month_df["type"] == tx_type].copy()
-
-    if df.empty:
-        st.info("データがありません")
-        return
-
-    df["ID"] = df["id"]
-
-    display_df = df.rename(columns={
-        "date": "年月",
-        "amount": "金額",
-        "description": "説明",
-        "category": "カテゴリ",
-    })
-
-    display_df = display_df.drop(columns=["type", "signed_amount"], errors="ignore")
-
-    display_df["年月"] = pd.to_datetime(display_df["年月"]).dt.strftime("%Y年%-m月")
-    display_df["削除"] = False
-
-    display_df = display_df[["ID", "年月", "金額", "説明", "カテゴリ", "削除"]]
-
-    edited = st.data_editor(
-        display_df,
-        key=f"{base_key}_table",
-        use_container_width=True,
-        hide_index=True,
-        height=300,
-        disabled=["ID", "年月", "金額", "説明", "カテゴリ"],
-        column_config={
-            "削除": st.column_config.CheckboxColumn("削除"),
-            "金額": st.column_config.NumberColumn("金額", format="¥%d"),
-            "ID": None,
-        },
-    )
-
-    # =========================
-    # 削除処理
-    # =========================
-    delete_ids = edited.loc[
-        (edited["削除"] == True) & (edited["ID"].notna()),
-        "ID"
-    ].tolist()
-
-    if st.button("削除", key=f"{base_key}_delete"):
-
-        if not delete_ids:
-            st.warning("削除対象がありません")
-            return
-
-        for i in delete_ids:
-            supabase.table("transactions").delete().eq("id", int(i)).execute()
-
-        st.success("削除しました")
-        st.rerun()
 
 
 def insert_transaction(tx_date, tx_type, category, amount, description):
@@ -1241,6 +1324,160 @@ def apply_recurring_full(df, recurring_df):
     return result
 full_df = apply_recurring_full(all_transactions_df, recurring_df)
 
+def render_transaction_manager(month_df, category_df, selected_month):
+
+    st.markdown("### 収支管理")
+
+    # カテゴリ分離（DB構造活用）
+    expense_categories = category_df[
+        (category_df["type"] == "expense") &
+        (category_df["is_deleted"] == False)
+    ]["name"].tolist()
+
+    income_categories = category_df[
+        (category_df["type"] == "income") &
+        (category_df["is_deleted"] == False)
+    ]["name"].tolist()
+
+    tab1, tab2 = st.tabs(["支出", "収入"])
+
+    for tab, ttype in [(tab1, "expense"), (tab2, "income")]:
+
+        with tab:
+            df = month_df[month_df["type"] == ttype].copy()
+            display_df = df[["id", "amount", "category", "description"]].copy()
+            display_df["削除"] = False
+            # 👇ここが重要
+            if ttype == "expense":
+                render_transaction_block(
+                    month_df,
+                    "expense",
+                    "支出",
+                    expense_categories,
+                    selected_month
+                )
+            else:
+                render_transaction_block(
+                    month_df,
+                    "income",
+                    "収入",
+                    income_categories,
+                    selected_month
+                )
+
+            df = month_df[month_df["type"] == ttype].copy()
+
+            # 削除チェック列追加
+            df["削除"] = False
+
+            edited_df = st.data_editor(
+                display_df,
+                num_rows="dynamic",
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "id": None,  # 👈これで非表示
+                    "amount": st.column_config.NumberColumn("金額", step=1),
+                    "category": st.column_config.SelectboxColumn("カテゴリ", options=category_list),
+                    "description": st.column_config.TextColumn("説明"),
+                    "削除": st.column_config.CheckboxColumn("削除"),
+                }
+            )
+
+            if st.button(f"{'支出' if ttype=='expense' else '収入'}を保存", key=f"save_{ttype}"):
+
+                # =========================
+                # 分離
+                # =========================
+                existing = edited_df[edited_df["id"].notna()].copy()
+                new_rows = edited_df[edited_df["id"].isna()].copy()
+                delete_rows = existing[existing["削除"] == True]
+
+                # =========================
+                # ① 削除
+                # =========================
+                delete_count = 0
+                for _, row in delete_rows.iterrows():
+                    supabase.table("transactions") \
+                        .delete() \
+                        .eq("id", int(row["id"])) \
+                        .execute()
+                    delete_count += 1
+
+                # =========================
+                # ② 更新
+                # =========================
+                existing = existing[existing["削除"] == False]
+
+                merged = existing.merge(
+                    df,
+                    on="id",
+                    suffixes=("_new", "_old")
+                )
+
+                # 型統一
+                merged["amount_new"] = pd.to_numeric(merged["amount_new"], errors="coerce").fillna(0)
+                merged["amount_old"] = pd.to_numeric(merged["amount_old"], errors="coerce").fillna(0)
+
+                merged["description_new"] = merged["description_new"].fillna("")
+                merged["description_old"] = merged["description_old"].fillna("")
+
+                merged["amount_new_int"] = merged["amount_new"].astype(int)
+                merged["amount_old_int"] = merged["amount_old"].astype(int)
+
+                changed = merged[
+                    (merged["amount_new_int"] != merged["amount_old_int"]) |
+                    (merged["category_new"] != merged["category_old"]) |
+                    (merged["description_new"] != merged["description_old"])
+                ]
+
+                update_count = 0
+                for _, row in changed.iterrows():
+
+                    supabase.table("transactions") \
+                        .update({
+                            "amount": int(row["amount_new_int"]),
+                            "category": str(row["category_new"]),
+                            "description": str(row["description_new"])
+                        }) \
+                        .eq("id", int(row["id"])) \
+                        .execute()
+
+                    update_count += 1
+
+                # =========================
+                # ③ 新規追加
+                # =========================
+                insert_count = 0
+
+                for _, row in new_rows.iterrows():
+
+                    try:
+                        amount = int(float(row["amount"]))
+                    except:
+                        amount = 0
+
+                    if amount == 0:
+                        continue
+
+                    supabase.table("transactions") \
+                        .insert({
+                            "date": pd.to_datetime(selected_month).strftime("%Y-%m-%d"),
+                            "type": ttype,
+                            "amount": amount,
+                            "category": row["category"],
+                            "description": row["description"]
+                        }) \
+                        .execute()
+
+                    insert_count += 1
+
+                # =========================
+                # 結果
+                # =========================
+                st.success(f"削除:{delete_count}件 / 更新:{update_count}件 / 追加:{insert_count}件")
+                st.rerun()
+
 def render_setup_notice(balance_ready: bool, recurring_ready: bool):
     missing = []
 
@@ -1377,13 +1614,11 @@ if page == "収支入力":
 
     st.markdown(f'<div class="sheet-caption">{month_label(selected_month)} の支出と収入を左右に並べて登録します。</div>', unsafe_allow_html=True)
 
-    col1, col2 = st.columns(2)
+    category_df = load_table_or_empty("categories")
+    category_list = category_df["name"].dropna().tolist()
+    category_df = pd.DataFrame(load_table_or_empty("categories"))
 
-    with col1:
-        render_transaction_block(month_df, "expense", "支出", expense_categories, selected_month)
-
-    with col2:
-        render_transaction_block(month_df, "income", "収入", income_categories, selected_month)
+    render_transaction_manager(month_df, category_df, selected_month)
 
 elif page == "月間収支":
 
