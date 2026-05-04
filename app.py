@@ -1120,9 +1120,11 @@ def render_transaction_form(tx_type: str, categories: list[str], selected_month:
 
 def render_transaction_editor(month_df: pd.DataFrame, categories: list[str], tx_type: str) -> None:
     """取引一覧を編集・削除できるテーブルとして表示します。"""
+    render_recurring_occurrence_list(month_df, tx_type)
+
     data = month_df[(month_df["type"] == tx_type) & (month_df.get("source", "manual") != "recurring")].copy()
     if data.empty:
-        st.info("手入力のデータがありません。")
+        st.info("手入力のデータはありません。定期収支は上の一覧に自動反映されています。")
         return
 
     if mobile_card_mode():
@@ -1169,6 +1171,34 @@ def render_transaction_editor(month_df: pd.DataFrame, categories: list[str], tx_
 
         st.success(f"削除:{len(delete_rows)}件 / 更新:{changed_count}件")
         st.rerun()
+
+
+def render_recurring_occurrence_list(month_df: pd.DataFrame, tx_type: str) -> None:
+    """対象月に自動反映された定期収支を一覧表示します。"""
+    if "source" not in month_df.columns:
+        return
+
+    recurring = month_df[(month_df["type"] == tx_type) & (month_df["source"] == "recurring")].copy()
+    if recurring.empty:
+        return
+
+    st.markdown("#### 定期収支（自動反映）")
+    st.caption("設定 > 定期収支 に登録された項目です。ここでは確認のみできます。変更・停止は設定画面で行ってください。")
+    display = recurring[["date", "amount", "category", "description"]].copy()
+    display["種別"] = "定期"
+    display["日付"] = display["date"].apply(format_jp_date)
+    display = display.rename(columns={"amount": "金額", "category": "カテゴリ", "description": "説明"})
+    display = display[["種別", "日付", "カテゴリ", "金額", "説明"]]
+
+    render_mobile_table_cards(display, "カテゴリ", "金額", ["種別", "日付", "説明"])
+    if not mobile_card_mode():
+        st.dataframe(
+            display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={"金額": st.column_config.NumberColumn(format="¥%d")},
+        )
+    st.divider()
 
 
 def render_transaction_card_editor(data: pd.DataFrame, categories: list[str], tx_type: str) -> None:
