@@ -776,7 +776,7 @@ def apply_recurring(month_df: pd.DataFrame, recurring_df: pd.DataFrame, selected
     base = month_df.copy()
     base["source"] = "manual"
     combined = pd.concat([base, pd.DataFrame(rows)], ignore_index=True)
-    return combined.drop_duplicates(subset=["date", "type", "category", "amount", "description"])
+    return combined.drop_duplicates(subset=["date", "type", "category", "amount", "description"], keep="last")
 
 
 def expand_recurring_transactions(transactions_df: pd.DataFrame, recurring_df: pd.DataFrame, until_month: date) -> pd.DataFrame:
@@ -1435,9 +1435,10 @@ def render_snapshot_settings(snapshots_df: pd.DataFrame) -> None:
 def recurring_display_frame(df: pd.DataFrame) -> pd.DataFrame:
     """定期収支の一覧表示用DataFrameを作成します。"""
     if df.empty:
-        return pd.DataFrame(columns=["ID", "種別", "日", "カテゴリ", "金額", "開始月", "終了月", "説明", "削除"])
+        return pd.DataFrame(columns=["ID", "区分", "種別", "日", "カテゴリ", "金額", "開始月", "終了月", "説明", "削除"])
     result = df.copy()
     result["ID"] = result["id"]
+    result["区分"] = "定期収支"
     result["種別"] = result["type"].map(type_label)
     result["日"] = result["day"]
     result["カテゴリ"] = result["category"]
@@ -1446,7 +1447,7 @@ def recurring_display_frame(df: pd.DataFrame) -> pd.DataFrame:
     result["終了月"] = result["end_month"]
     result["説明"] = result["description"]
     result["削除"] = False
-    return result[["ID", "種別", "日", "カテゴリ", "金額", "開始月", "終了月", "説明", "削除"]]
+    return result[["ID", "区分", "種別", "日", "カテゴリ", "金額", "開始月", "終了月", "説明", "削除"]]
 
 
 def render_recurring_settings(recurring_df: pd.DataFrame, cat_df: pd.DataFrame, selected_month: date) -> None:
@@ -1481,6 +1482,8 @@ def render_recurring_settings(recurring_df: pd.DataFrame, cat_df: pd.DataFrame, 
     tabs = st.tabs(["💸 支出", "💰 収入"])
     for tab, tx_type in [(tabs[0], "expense"), (tabs[1], "income")]:
         with tab:
+            st.markdown("#### 定期収支マスター一覧")
+            st.caption("毎月自動反映される登録項目です。通常の収支入力とは別管理です。")
             df = recurring_df[(recurring_df["type"] == tx_type) & (~recurring_df["is_deleted"])].copy()
             recurring_cards = recurring_display_frame(df)
             if mobile_card_mode():
@@ -1493,13 +1496,14 @@ def render_recurring_settings(recurring_df: pd.DataFrame, cat_df: pd.DataFrame, 
                 hide_index=True,
                 column_config={
                     "ID": None,
+                    "区分": st.column_config.TextColumn("区分", disabled=True),
                     "日": st.column_config.NumberColumn("日", min_value=1, max_value=28, step=1, disabled=True),
                     "金額": st.column_config.NumberColumn("金額", format="¥%d", disabled=True),
                     "開始月": st.column_config.DateColumn("開始月", format="YYYY-MM", disabled=True),
                     "終了月": st.column_config.DateColumn("終了月", format="YYYY-MM"),
                     "削除": st.column_config.CheckboxColumn("削除"),
                 },
-                disabled=["種別", "カテゴリ", "説明"],
+                disabled=["区分", "種別", "カテゴリ", "説明"],
             )
             delete_mode = st.radio("削除方法", ["全て削除", "選択月以降を停止"], horizontal=True, key=f"delete_mode_{tx_type}")
             if st.button("一覧を保存", key=f"recurring_save_{tx_type}"):
