@@ -908,7 +908,7 @@ def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str
         "設定": "設定",
     }
 
-    left, right = st.columns([2.4, 1.25])
+    left, middle, right = st.columns([2.4, .95, 1.25])
     with left:
         st.markdown('<div class="nav-caption">NAVIGATION</div>', unsafe_allow_html=True)
         page_label = st.segmented_control(
@@ -918,12 +918,19 @@ def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str
             label_visibility="collapsed",
             key="main_page_nav",
         )
+    with middle:
+        st.toggle("スマホ用カード表示", value=False, key="mobile_card_mode")
     with right:
         selected_month = month_selector("対象月", "main_month")
 
     render_setup_notice(balance_ready, recurring_ready)
     reverse_labels = {value: key for key, value in labels.items()}
     return reverse_labels[page_label], selected_month
+
+
+def mobile_card_mode() -> bool:
+    """スマホ向けカード表示モードが有効かを返します。"""
+    return bool(st.session_state.get("mobile_card_mode", False))
 
 
 def render_compact_card(title: str, amount: str, chips: list[str], body: str = "") -> None:
