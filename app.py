@@ -947,6 +947,8 @@ def render_compact_card(title: str, amount: str, chips: list[str], body: str = "
 
 def render_mobile_transaction_cards(data: pd.DataFrame, tx_type: str) -> None:
     """取引一覧をスマホ向けカードとして表示します。"""
+    if not mobile_card_mode():
+        return
     tx = data[data["type"] == tx_type].sort_values("date", ascending=False)
     if tx.empty:
         st.info("表示できるデータがありません。")
@@ -965,6 +967,8 @@ def render_mobile_transaction_cards(data: pd.DataFrame, tx_type: str) -> None:
 
 def render_mobile_table_cards(df: pd.DataFrame, title_col: str, amount_col: str, meta_cols: list[str]) -> None:
     """汎用テーブルをスマホ向けカードとして表示します。"""
+    if not mobile_card_mode():
+        return
     if df.empty:
         st.info("表示できるデータがありません。")
         return
@@ -984,6 +988,8 @@ def render_mobile_table_cards(df: pd.DataFrame, title_col: str, amount_col: str,
 
 def render_mobile_info_cards(df: pd.DataFrame, title_col: str, value_col: str, meta_cols: list[str]) -> None:
     """金額以外の一覧をスマホ向けカードとして表示します。"""
+    if not mobile_card_mode():
+        return
     if df.empty:
         st.info("表示できるデータがありません。")
         return
@@ -1038,15 +1044,16 @@ def render_budget_table(title: str, summary: pd.DataFrame) -> None:
     table = pd.concat([total, summary])
     mobile_table = table.reset_index().rename(columns={"index": "カテゴリ"})
     render_mobile_table_cards(mobile_table, "カテゴリ", "実際", ["予定", "差額"])
-    st.dataframe(
-        table,
-        use_container_width=True,
-        column_config={
-            "予定": st.column_config.NumberColumn(format="¥%d"),
-            "実際": st.column_config.NumberColumn(format="¥%d"),
-            "差額": st.column_config.NumberColumn(format="¥%d"),
-        },
-    )
+    if not mobile_card_mode():
+        st.dataframe(
+            table,
+            use_container_width=True,
+            column_config={
+                "予定": st.column_config.NumberColumn(format="¥%d"),
+                "実際": st.column_config.NumberColumn(format="¥%d"),
+                "差額": st.column_config.NumberColumn(format="¥%d"),
+            },
+        )
 
 
 def render_monthly_insights(month_df: pd.DataFrame, budgets_df: pd.DataFrame, cat_df: pd.DataFrame, selected_month: date) -> None:
@@ -1109,7 +1116,9 @@ def render_transaction_editor(month_df: pd.DataFrame, categories: list[str], tx_
         st.info("手入力のデータがありません。")
         return
 
-    render_transaction_card_editor(data, categories, tx_type)
+    if mobile_card_mode():
+        render_transaction_card_editor(data, categories, tx_type)
+        return
     editor = data[["id", "date", "amount", "category", "description"]].copy()
     editor["削除"] = False
     edited = st.data_editor(
@@ -1298,12 +1307,13 @@ def render_asset_page(transactions_df: pd.DataFrame, snapshots_df: pd.DataFrame,
         columns={"month_label": "年月", "opening": "月初残高", "income": "収入", "expense": "支出", "net": "増減", "balance": "月末残高"}
     )
     render_mobile_table_cards(display, "年月", "月末残高", ["月初残高", "収入", "支出", "増減"])
-    st.dataframe(
-        display,
-        use_container_width=True,
-        hide_index=True,
-        column_config={col: st.column_config.NumberColumn(format="¥%d") for col in display.columns if col != "年月"},
-    )
+    if not mobile_card_mode():
+        st.dataframe(
+            display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={col: st.column_config.NumberColumn(format="¥%d") for col in display.columns if col != "年月"},
+        )
 
 
 def render_analysis_page(month_df: pd.DataFrame, budgets_df: pd.DataFrame, cat_df: pd.DataFrame) -> None:
@@ -1427,7 +1437,9 @@ def render_recurring_settings(recurring_df: pd.DataFrame, cat_df: pd.DataFrame, 
         with tab:
             df = recurring_df[(recurring_df["type"] == tx_type) & (~recurring_df["is_deleted"])].copy()
             recurring_cards = recurring_display_frame(df)
-            render_recurring_card_editor(df, tx_type, selected_month)
+            if mobile_card_mode():
+                render_recurring_card_editor(df, tx_type, selected_month)
+                continue
             edited = st.data_editor(
                 recurring_cards,
                 key=f"recurring_editor_{tx_type}",
@@ -1587,6 +1599,43 @@ def render_category_rename_form(
                 st.rerun()
 
 
+@st.dialog("カテゴリ削除の確認")
+def render_category_delete_confirm_dialog() -> None:
+    """カテゴリ削除前の最終確認ダイアログを表示します。"""
+    pending = st.session_state.get("pending_category_delete")
+    if not pending:
+        st.info("確認する削除内容がありません。")
+        if st.button("閉じる"):
+            st.rerun()
+        return
+
+    st.markdown("以下の内容でカテゴリを削除します。")
+    st.warning(
+        f"「{pending['old_name']}」に紐づく取引・予算・定期収支を、"
+        f"「{pending['target_name']}」へ移行します。"
+    )
+    st.caption(
+        f"移行対象: 取引 {pending['usage']['transactions']}件 / "
+        f"予算 {pending['usage']['budgets']}件 / 定期収支 {pending['usage']['recurring']}件"
+    )
+
+    cols = st.columns(2)
+    if cols[0].button("キャンセル", key="cancel_category_delete"):
+        st.session_state.pop("pending_category_delete", None)
+        st.rerun()
+    if cols[1].button("移行して削除", type="primary", key="confirm_category_delete"):
+        if pending["mode"] == "新規カテゴリを作成":
+            save_category(pending["target_name"], pending["tx_type"])
+        delete_category_with_reassignment(
+            int(pending["source_id"]),
+            pending["old_name"],
+            pending["target_name"],
+        )
+        st.session_state.pop("pending_category_delete", None)
+        st.success("カテゴリを削除しました。")
+        st.rerun()
+
+
 def render_category_delete_form(
     cat_df: pd.DataFrame, transactions_df: pd.DataFrame, budgets_df: pd.DataFrame, recurring_df: pd.DataFrame
 ) -> None:
@@ -1599,62 +1648,61 @@ def render_category_delete_form(
     active = cat_df[~cat_df["is_deleted"]].copy()
     type_label_selected = st.segmented_control("種別", ["支出", "収入"], default="支出", key="delete_type")
     tx_type = type_value(type_label_selected)
-    options = active[active["type"] == tx_type]["name"].tolist()
-    if not options:
+    scoped = active[active["type"] == tx_type].copy()
+    source_ids = scoped["id"].astype(int).tolist()
+    if not source_ids:
         st.info("削除できるカテゴリがありません。")
         return
 
-    with st.form("category_delete_reassign_form"):
-        scoped = active[active["type"] == tx_type].copy()
-        source_ids = scoped["id"].astype(int).tolist()
-        source_id = st.selectbox(
-            "削除するカテゴリ",
-            source_ids,
-            key="delete_source_category_id",
-            format_func=lambda category_id: category_name_by_id(scoped, int(category_id)),
-        )
-        old_name = category_name_by_id(scoped, int(source_id))
-        usage = category_usage_counts(old_name, transactions_df, budgets_df, recurring_df)
-        st.caption(f"移行対象: 取引 {usage['transactions']}件 / 予算 {usage['budgets']}件 / 定期収支 {usage['recurring']}件")
-        mode = st.radio("移行先", ["既存カテゴリ", "新規カテゴリを作成"], horizontal=True, key="delete_target_mode")
+    source_id = st.selectbox(
+        "削除するカテゴリ",
+        source_ids,
+        key=f"delete_source_category_id_{tx_type}",
+        format_func=lambda category_id: category_name_by_id(scoped, int(category_id)),
+    )
+    old_name = category_name_by_id(scoped, int(source_id))
+    usage = category_usage_counts(old_name, transactions_df, budgets_df, recurring_df)
+    st.caption(f"移行対象: 取引 {usage['transactions']}件 / 予算 {usage['budgets']}件 / 定期収支 {usage['recurring']}件")
 
-        target_name = ""
-        if mode == "既存カテゴリ":
-            target_ids = [category_id for category_id in source_ids if category_id != int(source_id)]
-            if not target_ids:
-                st.warning("同じ種別の移行先カテゴリがありません。新規カテゴリを作成してください。")
-            else:
-                target_id = st.selectbox(
-                    "移行先カテゴリ",
-                    target_ids,
-                    key=f"delete_target_category_id_{int(source_id)}",
-                    format_func=lambda category_id: category_name_by_id(scoped, int(category_id)),
-                )
-                target_name = category_name_by_id(scoped, int(target_id))
+    mode = st.radio("移行先", ["既存カテゴリ", "新規カテゴリを作成"], horizontal=True, key=f"delete_target_mode_{tx_type}")
+    target_name = ""
+    if mode == "既存カテゴリ":
+        target_ids = [category_id for category_id in source_ids if category_id != int(source_id)]
+        if not target_ids:
+            st.warning("同じ種別の移行先カテゴリがありません。新規カテゴリを作成してください。")
         else:
-            target_name = st.text_input("新規カテゴリ名", key="delete_new_category_name")
+            target_id = st.selectbox(
+                "移行先カテゴリ",
+                target_ids,
+                key=f"delete_target_category_id_{tx_type}_{int(source_id)}",
+                format_func=lambda category_id: category_name_by_id(scoped, int(category_id)),
+            )
+            target_name = category_name_by_id(scoped, int(target_id))
+    else:
+        target_name = st.text_input("新規カテゴリ名", key=f"delete_new_category_name_{tx_type}")
 
-        if target_name:
-            st.caption(f"実行時の移行先: {target_name}")
+    target_name = target_name.strip()
+    if target_name:
+        st.info(f"「{old_name}」から「{target_name}」へ移行します。")
 
-        confirm = st.checkbox("紐づくデータを移行してから削除する")
-        submitted = st.form_submit_button("移行してカテゴリを削除", type="primary")
-        if submitted:
-            target_name = target_name.strip()
-            if not confirm:
-                st.error("確認チェックを入れてください。")
-            elif not target_name:
-                st.error("移行先カテゴリを指定してください。")
-            elif target_name == old_name:
-                st.error("削除するカテゴリ自身は移行先にできません。")
-            elif mode == "新規カテゴリを作成" and target_name in active_categories(cat_df):
-                st.error("同じカテゴリ名が既にあります。")
-            else:
-                if mode == "新規カテゴリを作成":
-                    save_category(target_name, tx_type)
-                delete_category_with_reassignment(int(source_id), old_name, target_name)
-                st.success(f"{old_name} のデータを {target_name} に移行して削除しました。")
-                st.rerun()
+    if st.button("確認へ進む", type="primary", disabled=not target_name, key=f"open_category_delete_confirm_{tx_type}"):
+        if target_name == old_name:
+            st.error("削除するカテゴリ自身は移行先にできません。")
+        elif mode == "新規カテゴリを作成" and target_name in active_categories(cat_df):
+            st.error("同じカテゴリ名が既にあります。")
+        else:
+            st.session_state.pending_category_delete = {
+                "source_id": int(source_id),
+                "old_name": old_name,
+                "target_name": target_name,
+                "tx_type": tx_type,
+                "mode": mode,
+                "usage": usage,
+            }
+            st.rerun()
+
+    if st.session_state.get("pending_category_delete"):
+        render_category_delete_confirm_dialog()
 
 
 def render_category_list(cat_df: pd.DataFrame) -> None:
@@ -1662,13 +1710,14 @@ def render_category_list(cat_df: pd.DataFrame) -> None:
     st.subheader("カテゴリ一覧")
     category_cards = categories_display_frame(cat_df)
     render_mobile_info_cards(category_cards, "カテゴリ名", "種別", [])
-    st.dataframe(
-        category_cards.drop(columns=["削除"]),
-        key="category_list",
-        use_container_width=True,
-        hide_index=True,
-        column_config={"ID": None},
-    )
+    if not mobile_card_mode():
+        st.dataframe(
+            category_cards.drop(columns=["削除"]),
+            key="category_list",
+            use_container_width=True,
+            hide_index=True,
+            column_config={"ID": None},
+        )
 
 
 def render_category_settings(
@@ -1711,7 +1760,8 @@ def render_budget_settings(cat_df: pd.DataFrame, budgets_df: pd.DataFrame) -> No
             data = merged[merged["type"] == tx_type][["name", "amount"]].rename(columns={"name": "カテゴリ", "amount": "予算"})
             st.markdown(f"### {title}")
             render_mobile_table_cards(data, "カテゴリ", "予算", [])
-            st.dataframe(data, use_container_width=True, hide_index=True, column_config={"予算": st.column_config.NumberColumn(format="¥%d")})
+            if not mobile_card_mode():
+                st.dataframe(data, use_container_width=True, hide_index=True, column_config={"予算": st.column_config.NumberColumn(format="¥%d")})
             st.caption(f"合計: {yen(data['予算'].sum())}")
 
 
