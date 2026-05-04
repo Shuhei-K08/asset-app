@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import date
 from typing import Any
 
@@ -33,17 +34,18 @@ def inject_styles() -> None:
         <style>
         .stApp {{
             background:
-                radial-gradient(circle at top left, rgba(244, 91, 34, .12), transparent 30rem),
-                linear-gradient(135deg, #f8fafc 0%, #edf2f7 48%, #fff7f2 100%);
+                radial-gradient(circle at top left, rgba(244, 91, 34, .10), transparent 24rem),
+                radial-gradient(circle at top right, rgba(77, 171, 247, .10), transparent 22rem),
+                linear-gradient(135deg, #f8fafc 0%, #eef3f8 52%, #fffaf5 100%);
             color: {INK};
         }}
         h1, h2, h3, label {{ letter-spacing: 0; }}
         section[data-testid="stSidebar"] {{
-            background: rgba(255, 255, 255, .82);
-            border-right: 1px solid rgba(219, 225, 234, .9);
+            display: none;
         }}
         .block-container {{
-            padding-top: 1.6rem;
+            max-width: 1180px;
+            padding-top: 1.25rem;
             padding-bottom: 3rem;
         }}
         .app-hero {{
@@ -51,8 +53,8 @@ def inject_styles() -> None:
             align-items: flex-end;
             justify-content: space-between;
             gap: 1rem;
-            padding: 1.3rem 1.45rem;
-            margin-bottom: 1.2rem;
+            padding: 1.25rem 1.35rem;
+            margin-bottom: .85rem;
             color: white;
             background:
                 linear-gradient(135deg, rgba(23, 32, 51, .92), rgba(48, 71, 94, .86)),
@@ -76,6 +78,44 @@ def inject_styles() -> None:
             color: rgba(255, 255, 255, .88);
             font-weight: 700;
             white-space: nowrap;
+        }}
+        .top-shell {{
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            padding: .75rem;
+            margin-bottom: 1.15rem;
+            border: 1px solid rgba(219, 225, 234, .92);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, .82);
+            box-shadow: 0 14px 38px rgba(23, 32, 51, .10);
+            backdrop-filter: blur(12px);
+        }}
+        .top-shell [data-testid="stHorizontalBlock"] {{
+            align-items: end;
+        }}
+        .nav-caption {{
+            color: {MUTED};
+            font-size: .78rem;
+            font-weight: 800;
+            margin: 0 0 .25rem;
+        }}
+        div[data-testid="stSegmentedControl"] {{
+            gap: .35rem;
+        }}
+        div[data-testid="stSegmentedControl"] button {{
+            min-height: 2.5rem;
+            border-radius: 8px;
+            border: 1px solid rgba(219, 225, 234, .95);
+            background: #fff;
+            color: {INK};
+            font-weight: 800;
+        }}
+        div[data-testid="stSegmentedControl"] button[aria-pressed="true"] {{
+            border-color: rgba(244, 91, 34, .45);
+            background: linear-gradient(135deg, rgba(244, 91, 34, .16), rgba(77, 171, 247, .10));
+            color: {ACCENT_DARK};
+            box-shadow: inset 0 0 0 1px rgba(244, 91, 34, .10);
         }}
         .section-title {{
             color: {INK};
@@ -132,6 +172,55 @@ def inject_styles() -> None:
             font-size: .82rem;
             font-weight: 800;
         }}
+        .mobile-list {{
+            display: none;
+        }}
+        .mobile-card {{
+            border: 1px solid rgba(219, 225, 234, .95);
+            border-radius: 8px;
+            padding: .85rem .95rem;
+            margin: .55rem 0;
+            background: rgba(255, 255, 255, .92);
+            box-shadow: 0 8px 22px rgba(23, 32, 51, .07);
+        }}
+        .mobile-card-top {{
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: .75rem;
+            margin-bottom: .55rem;
+        }}
+        .mobile-card-title {{
+            color: {INK};
+            font-size: .98rem;
+            font-weight: 850;
+            line-height: 1.25;
+        }}
+        .mobile-card-amount {{
+            color: {NAVY};
+            font-size: 1.08rem;
+            font-weight: 900;
+            white-space: nowrap;
+        }}
+        .mobile-card-meta {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: .35rem;
+        }}
+        .mobile-chip {{
+            display: inline-flex;
+            align-items: center;
+            min-height: 1.65rem;
+            padding: .15rem .45rem;
+            border-radius: 999px;
+            background: {SOFT};
+            color: {MUTED};
+            font-size: .78rem;
+            font-weight: 750;
+        }}
+        .desktop-table {{
+            display: block;
+        }}
         .stButton > button, .stFormSubmitButton > button {{
             border: 0;
             border-radius: 8px;
@@ -150,10 +239,57 @@ def inject_styles() -> None:
             border-radius: 8px;
             overflow: hidden;
         }}
+        div[data-testid="stDataFrame"] [role="grid"] {{
+            border: 1px solid rgba(219, 225, 234, .95);
+        }}
         @media (max-width: 720px) {{
-            .app-hero {{ display: block; }}
+            .block-container {{
+                padding: .85rem .85rem 2rem;
+            }}
+            .app-hero {{
+                display: block;
+                padding: 1rem;
+                margin-bottom: .7rem;
+            }}
+            .app-hero h1 {{
+                font-size: 1.65rem;
+            }}
+            .app-hero p {{
+                font-size: .86rem;
+            }}
             .hero-month {{ text-align: left; margin-top: .75rem; }}
+            .top-shell {{
+                position: static;
+                padding: .65rem;
+                margin-bottom: .85rem;
+            }}
+            div[data-testid="stSegmentedControl"] {{
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }}
+            div[data-testid="stSegmentedControl"] button {{
+                width: 100%;
+                padding: .35rem .45rem;
+                font-size: .86rem;
+            }}
+            div[data-testid="stHorizontalBlock"] {{
+                gap: .6rem;
+            }}
+            .metric-card {{
+                min-height: 96px;
+                padding: .8rem .85rem;
+                margin-bottom: .6rem;
+            }}
             .metric-value {{ font-size: 1.35rem; }}
+            .desktop-table {{
+                display: none;
+            }}
+            .mobile-list {{
+                display: block;
+            }}
+            div[data-testid="stDataFrame"] {{
+                display: none;
+            }}
         }}
         </style>
         """,
@@ -164,7 +300,23 @@ def inject_styles() -> None:
 @st.cache_resource
 def get_supabase_client():
     """Streamlit secretsからSupabaseクライアントを作成してキャッシュします。"""
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+    return create_client(required_secret("SUPABASE_URL"), required_secret("SUPABASE_KEY"))
+
+
+def optional_secret(name: str) -> str | None:
+    """Streamlit secretsまたは環境変数から任意の設定値を取得します。"""
+    try:
+        return st.secrets.get(name) or os.getenv(name)
+    except Exception:
+        return os.getenv(name)
+
+
+def required_secret(name: str) -> str:
+    """必須設定値を取得し、見つからない場合は分かりやすいエラーにします。"""
+    value = optional_secret(name)
+    if not value:
+        raise RuntimeError(f"{name} が設定されていません。")
+    return value
 
 
 def require_login() -> None:
@@ -176,9 +328,14 @@ def require_login() -> None:
         return
 
     st.title("ログイン")
+    app_password = optional_secret("APP_PASSWORD")
+    if not app_password:
+        st.error("APP_PASSWORD が設定されていません。.streamlit/secrets.toml または環境変数を確認してください。")
+        st.stop()
+
     password = st.text_input("パスワードを入力してください", type="password")
     if st.button("ログイン"):
-        if password == st.secrets["APP_PASSWORD"]:
+        if password == app_password:
             st.session_state.authenticated = True
             st.rerun()
         st.error("パスワードが違います")
@@ -582,6 +739,111 @@ def metric_card(label: str, value: str, sub: str = "") -> None:
     )
 
 
+def render_top_controls(balance_ready: bool, recurring_ready: bool) -> tuple[str, date]:
+    """サイドバーの代わりになる上部ナビゲーションと対象月選択を表示します。"""
+    pages = ["収支入力", "月間収支", "資産推移", "設定"]
+    labels = {
+        "収支入力": "入力",
+        "月間収支": "月間",
+        "資産推移": "推移",
+        "設定": "設定",
+    }
+
+    with st.container(border=True):
+        left, right = st.columns([2.6, 1.4])
+        with left:
+            st.markdown('<div class="nav-caption">MENU</div>', unsafe_allow_html=True)
+            page_label = st.segmented_control(
+                "メニュー",
+                [labels[page] for page in pages],
+                default=labels[pages[0]],
+                label_visibility="collapsed",
+                key="main_page_nav",
+            )
+        with right:
+            selected_month = month_selector("対象月", "main_month")
+
+    render_setup_notice(balance_ready, recurring_ready)
+    reverse_labels = {value: key for key, value in labels.items()}
+    return reverse_labels[page_label], selected_month
+
+
+def mobile_card(title: str, amount: str, chips: list[str], body: str = "") -> str:
+    """スマホ表示向けのカードHTMLを作成します。"""
+    chip_html = "".join(f'<span class="mobile-chip">{chip}</span>' for chip in chips if chip)
+    body_html = f'<div class="metric-sub">{body}</div>' if body else ""
+    return f"""
+    <div class="mobile-card">
+        <div class="mobile-card-top">
+            <div class="mobile-card-title">{title}</div>
+            <div class="mobile-card-amount">{amount}</div>
+        </div>
+        <div class="mobile-card-meta">{chip_html}</div>
+        {body_html}
+    </div>
+    """
+
+
+def render_mobile_transaction_cards(data: pd.DataFrame, tx_type: str) -> None:
+    """取引一覧をスマホ向けカードとして表示します。"""
+    tx = data[data["type"] == tx_type].sort_values("date", ascending=False)
+    if tx.empty:
+        st.markdown('<div class="mobile-list">', unsafe_allow_html=True)
+        st.info("表示できるデータがありません。")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    cards = []
+    for _, row in tx.iterrows():
+        source = "定期" if row.get("source") == "recurring" else "手入力"
+        title = str(row.get("description") or row.get("category") or type_label(tx_type))
+        cards.append(
+            mobile_card(
+                title=title,
+                amount=yen(row["amount"]),
+                chips=[format_jp_date(row["date"]), str(row.get("category") or "未分類"), source],
+            )
+        )
+    st.markdown(f'<div class="mobile-list">{"".join(cards)}</div>', unsafe_allow_html=True)
+
+
+def render_mobile_table_cards(df: pd.DataFrame, title_col: str, amount_col: str, meta_cols: list[str]) -> None:
+    """汎用テーブルをスマホ向けカードとして表示します。"""
+    if df.empty:
+        st.markdown('<div class="mobile-list">', unsafe_allow_html=True)
+        st.info("表示できるデータがありません。")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    cards = []
+    for _, row in df.iterrows():
+        amount = row[amount_col]
+        amount_text = amount if isinstance(amount, str) else yen(amount)
+        chips = []
+        for col in meta_cols:
+            if col in row and pd.notna(row[col]):
+                value = row[col]
+                value_text = value if isinstance(value, str) else yen(value)
+                chips.append(f"{col}: {value_text}")
+        cards.append(mobile_card(str(row[title_col]), amount_text, chips))
+    st.markdown(f'<div class="mobile-list">{"".join(cards)}</div>', unsafe_allow_html=True)
+
+
+def render_mobile_info_cards(df: pd.DataFrame, title_col: str, value_col: str, meta_cols: list[str]) -> None:
+    """金額以外の一覧をスマホ向けカードとして表示します。"""
+    if df.empty:
+        st.markdown('<div class="mobile-list">', unsafe_allow_html=True)
+        st.info("表示できるデータがありません。")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    cards = []
+    for _, row in df.iterrows():
+        chips = [f"{col}: {row[col]}" for col in meta_cols if col in row and pd.notna(row[col])]
+        cards.append(mobile_card(str(row[title_col]), str(row[value_col]), chips))
+    st.markdown(f'<div class="mobile-list">{"".join(cards)}</div>', unsafe_allow_html=True)
+
+
 def category_summary(month_df: pd.DataFrame, budgets_df: pd.DataFrame, categories: list[str], tx_type: str) -> pd.DataFrame:
     """カテゴリ別の予定・実績・差額テーブルを作成します。"""
     actual = month_df[month_df["type"] == tx_type].groupby("category")["amount"].sum().rename("実際")
@@ -624,6 +886,8 @@ def render_budget_table(title: str, summary: pd.DataFrame) -> None:
         index=["合計"],
     )
     table = pd.concat([total, summary])
+    mobile_table = table.reset_index().rename(columns={"index": "カテゴリ"})
+    render_mobile_table_cards(mobile_table, "カテゴリ", "実際", ["予定", "差額"])
     st.dataframe(
         table,
         use_container_width=True,
@@ -639,7 +903,7 @@ def render_transaction_form(tx_type: str, categories: list[str], selected_month:
     """支出または収入の追加フォームを表示します。"""
     title = type_label(tx_type)
     with st.form(f"add_{tx_type}_form", clear_on_submit=True):
-        cols = st.columns([1, 1.2, 2, 1.7])
+        cols = st.columns([1, 1.2, 1.4, 1.7])
         tx_date = cols[0].date_input("日付", value=selected_month, key=f"{tx_type}_date")
         amount = cols[1].number_input("金額", min_value=1, step=100, value=1000, key=f"{tx_type}_amount")
         category = cols[2].selectbox("カテゴリ", categories, key=f"{tx_type}_category")
@@ -657,6 +921,7 @@ def render_transaction_editor(month_df: pd.DataFrame, categories: list[str], tx_
         st.info("手入力のデータがありません。")
         return
 
+    render_mobile_transaction_cards(data, tx_type)
     editor = data[["id", "date", "amount", "category", "description"]].copy()
     editor["削除"] = False
     edited = st.data_editor(
@@ -797,6 +1062,7 @@ def render_asset_page(transactions_df: pd.DataFrame, snapshots_df: pd.DataFrame,
     display = display.rename(
         columns={"month_label": "年月", "opening": "月初残高", "income": "収入", "expense": "支出", "net": "増減", "balance": "月末残高"}
     )
+    render_mobile_table_cards(display, "年月", "月末残高", ["月初残高", "収入", "支出", "増減"])
     st.dataframe(
         display,
         use_container_width=True,
@@ -868,8 +1134,10 @@ def render_recurring_settings(recurring_df: pd.DataFrame, cat_df: pd.DataFrame, 
     for tab, tx_type in [(tabs[0], "expense"), (tabs[1], "income")]:
         with tab:
             df = recurring_df[(recurring_df["type"] == tx_type) & (~recurring_df["is_deleted"])].copy()
+            recurring_cards = recurring_display_frame(df)
+            render_mobile_table_cards(recurring_cards, "カテゴリ", "金額", ["種別", "日", "開始月", "終了月"])
             edited = st.data_editor(
-                recurring_display_frame(df),
+                recurring_cards,
                 key=f"recurring_editor_{tx_type}",
                 use_container_width=True,
                 hide_index=True,
@@ -922,8 +1190,10 @@ def render_category_settings(cat_df: pd.DataFrame) -> None:
                 st.success("カテゴリを追加しました。")
                 st.rerun()
 
+    category_cards = categories_display_frame(cat_df)
+    render_mobile_info_cards(category_cards, "カテゴリ名", "種別", [])
     edited = st.data_editor(
-        categories_display_frame(cat_df),
+        category_cards,
         key="category_editor",
         use_container_width=True,
         hide_index=True,
@@ -959,6 +1229,7 @@ def render_budget_settings(cat_df: pd.DataFrame, budgets_df: pd.DataFrame) -> No
         with col:
             data = merged[merged["type"] == tx_type][["name", "amount"]].rename(columns={"name": "カテゴリ", "amount": "予算"})
             st.markdown(f"### {title}")
+            render_mobile_table_cards(data, "カテゴリ", "予算", [])
             st.dataframe(data, use_container_width=True, hide_index=True, column_config={"予算": st.column_config.NumberColumn(format="¥%d")})
             st.caption(f"合計: {yen(data['予算'].sum())}")
 
@@ -1029,13 +1300,7 @@ def main() -> None:
         st.error("categoriesテーブルにデータがありません。先にカテゴリを登録してください。")
         st.stop()
 
-    with st.sidebar:
-        st.markdown("## 資産管理")
-        page = st.radio("メニュー", ["収支入力", "月間収支", "資産推移", "設定"], label_visibility="collapsed")
-        st.divider()
-        selected_month = month_selector("対象月", "main_month")
-        st.divider()
-        render_setup_notice(balance_ready, recurring_ready)
+    page, selected_month = render_top_controls(balance_ready, recurring_ready)
 
     start, end = month_range(selected_month)
     full_transactions_df = expand_recurring_transactions(transactions_df, recurring_df, selected_month)
